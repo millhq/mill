@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.134.0-beta.3140](https://github.com/millhq/mill/compare/v0.133.2-beta.3140...v0.134.0-beta.3140) (2026-09-10)
+
+
+### Features
+
+* validate structured AI results ([#903](https://github.com/millhq/mill/issues/903)) ([fdb0cbe](https://github.com/millhq/mill/commit/fdb0cbe48432d67e2fce8b17007db2867aac0abe))
+
 ## [0.5.0](https://github.com/alicoding/mill/compare/v0.4.0...v0.5.0) (2026-08-22)
 
 
