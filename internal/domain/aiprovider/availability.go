@@ -92,11 +92,13 @@ type PermissionResult struct {
 }
 
 type OperationFeature struct {
-	Operation     Operation      `json:"operation"`
-	Support       Support        `json:"support"`
-	Evidence      EvidenceSource `json:"evidence"`
-	WireOperation string         `json:"wireOperation"`
-	ReasonCodes   []string       `json:"reasonCodes"`
+	Operation         Operation       `json:"operation"`
+	Support           Support         `json:"support"`
+	Evidence          EvidenceSource  `json:"evidence"`
+	WireOperation     string          `json:"wireOperation"`
+	ReasonCodes       []string        `json:"reasonCodes"`
+	LastSampleAttempt *SampleEvidence `json:"lastSampleAttempt,omitempty"`
+	LastSampleSuccess *SampleEvidence `json:"lastSampleSuccess,omitempty"`
 }
 
 type ModelChoice struct {

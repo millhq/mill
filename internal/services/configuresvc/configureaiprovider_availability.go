@@ -106,7 +106,7 @@ func StartAIProviderCheckWithActor(c *ConfigureService, id, actor string) aiprov
 	c.availabilityMu.Unlock()
 	c.emitAIProviderAvailabilityChanged(id, checkID)
 	go c.runAIProviderCheck(ctx, p, report, actor)
-	return cloneAvailabilityReport(report)
+	return c.projectAIProviderSampleEvidence(report)
 }
 
 // GetAIProviderAvailability is a cache-only read.
@@ -125,7 +125,7 @@ func (c *ConfigureService) GetAIProviderAvailability(id string) aiprovider.Repor
 			c.availabilityReports[id] = report
 		}
 		c.availabilityMu.Unlock()
-		return cloneAvailabilityReport(report)
+		return c.projectAIProviderSampleEvidence(report)
 	}
 	c.availabilityMu.Unlock()
 	p, exists := c.aiProviderSnapshot(id)
@@ -133,7 +133,7 @@ func (c *ConfigureService) GetAIProviderAvailability(id string) aiprovider.Repor
 		return missingProviderReport(id, c.availabilityMachineID, c.availabilitySessionID)
 	}
 	endpoint, _ := aiclient.InspectionEndpoint(aiclient.Kind(p.Kind), p.BaseURL)
-	return c.initialAvailabilityReport(p, "", c.aiProviderConfigRevision(p), endpoint)
+	return c.projectAIProviderSampleEvidence(c.initialAvailabilityReport(p, "", c.aiProviderConfigRevision(p), endpoint))
 }
 
 // ListAIProviderAvailability is a cache-only read with one row per provider.
@@ -155,7 +155,7 @@ func (c *ConfigureService) CancelAIProviderCheck(id, checkID string) aiprovider.
 	if !ok || report.CheckID != checkID || !active || worker.checkID != checkID {
 		c.availabilityMu.Unlock()
 		if ok {
-			return cloneAvailabilityReport(report)
+			return c.projectAIProviderSampleEvidence(report)
 		}
 		return c.GetAIProviderAvailability(id)
 	}
@@ -167,7 +167,7 @@ func (c *ConfigureService) CancelAIProviderCheck(id, checkID string) aiprovider.
 	delete(c.availabilityWorkers, id)
 	c.availabilityMu.Unlock()
 	c.emitAIProviderAvailabilityChanged(id, checkID)
-	return cloneAvailabilityReport(report)
+	return c.projectAIProviderSampleEvidence(report)
 }
 
 // InvalidateAIProviderAvailability cancels and marks local evidence stale. It
@@ -432,6 +432,8 @@ func cloneAvailabilityReport(report aiprovider.Report) aiprovider.Report {
 	report.Operations = append([]aiprovider.OperationFeature(nil), report.Operations...)
 	for i := range report.Operations {
 		report.Operations[i].ReasonCodes = append([]string(nil), report.Operations[i].ReasonCodes...)
+		report.Operations[i].LastSampleAttempt = cloneSampleEvidence(report.Operations[i].LastSampleAttempt)
+		report.Operations[i].LastSampleSuccess = cloneSampleEvidence(report.Operations[i].LastSampleSuccess)
 	}
 	report.ModelChoices = append([]aiprovider.ModelChoice(nil), report.ModelChoices...)
 	if report.SelectedModelFound != nil {
@@ -439,6 +441,14 @@ func cloneAvailabilityReport(report aiprovider.Report) aiprovider.Report {
 		report.SelectedModelFound = &v
 	}
 	return report
+}
+
+func cloneSampleEvidence(evidence *aiprovider.SampleEvidence) *aiprovider.SampleEvidence {
+	if evidence == nil {
+		return nil
+	}
+	copy := *evidence
+	return &copy
 }
 func appendUnique(values []string, value string) []string {
 	for _, existing := range values {

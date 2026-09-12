@@ -222,6 +222,8 @@ export interface OperationFeature {
     "evidence": EvidenceSource;
     "wireOperation": string;
     "reasonCodes": string[] | null;
+    "lastSampleAttempt"?: SampleEvidence | null;
+    "lastSampleSuccess"?: SampleEvidence | null;
 }
 
 export interface PermissionResult {
@@ -269,6 +271,59 @@ export interface Report {
     "freshness": Freshness;
     "lifecycle": CheckStatus;
 }
+
+/**
+ * SampleEvidence is operation-scoped evidence produced by an ordinary sample
+ * run. The containing OperationFeature supplies the operation identity.
+ */
+export interface SampleEvidence {
+    "runID": string;
+    "sampleVersion": string;
+    "schemaDigest": string;
+    "configRevision": string;
+    "checkedAt": string;
+    "outcome": SampleOutcome;
+    "freshness": Freshness;
+    "authentication": AuthenticationStatus;
+}
+
+export enum SampleOutcome {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    SampleOutcomeSucceeded = "succeeded",
+    SampleOutcomeFailed = "failed",
+    SampleOutcomeCancelled = "cancelled",
+};
+
+/**
+ * SamplePreview describes an ordinary, visible workflow prepared for one
+ * provider operation. It contains configuration metadata only, never a key or
+ * raw provider response.
+ */
+export interface SamplePreview {
+    "workflowID": string;
+    "operation": Operation;
+    "sampleVersion": string;
+    "status": SampleStatus;
+    "syntheticInput": string;
+    "safeDestination": string;
+    "model": string;
+    "configRevision": string;
+}
+
+export enum SampleStatus {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    SampleStatusCreated = "created",
+    SampleStatusExisting = "existing",
+    SampleStatusModified = "modified",
+};
 
 export enum Support {
     /**

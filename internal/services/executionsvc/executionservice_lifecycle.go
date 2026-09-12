@@ -77,6 +77,7 @@ func PrepareExecutionServiceWithVersionAndOwnership(databaseURL, appVersion stri
 	e := &ExecutionService{
 		comp: comp, guard: guard, cancelState: newCancelState(), appVersion: appVersion,
 		aiProviderMutation: newAIProviderMutationState(ownership),
+		aiProviderSamples:  aiProviderSampleRuntime{observers: newAIProviderSampleObserverState()},
 	}
 	ctx, err := execution.Prepare("mill", appVersion, databaseURL, func(ctx execution.Context) {
 		composition.SetGuardrailGate(e.guardrailGate)
@@ -119,5 +120,6 @@ func LaunchExecutionService(e *ExecutionService) error {
 //
 //wails:ignore
 func (e *ExecutionService) Shutdown(timeout time.Duration) error {
+	stopAIProviderSampleObservers(e.aiProviderSamples.observers)
 	return execution.Shutdown(e.ctx, timeout)
 }

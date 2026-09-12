@@ -77,6 +77,7 @@ var destructiveToolNames = map[string]bool{
 	"test_request":            true,
 	"start_ai_provider_check": true,
 	"import_aiprovider":       true, "apply_aiprovider_import": true,
+	"restore_ai_provider_feature_sample": true,
 }
 
 func TestBuiltInTools_DestructiveToolsAreMarkedDestructive(t *testing.T) {
@@ -105,7 +106,8 @@ func TestBuiltInTools_DestructiveToolsAreMarkedDestructive(t *testing.T) {
 // repeated call (same arguments) must leave the same end state.
 var idempotentEditToolNames = map[string]bool{
 	"atlas_diagram_edit_cells": true, "atlas_sheet_edit_cells": true, "atlas_xlsx_edit_cells": true,
-	"cancel_ai_provider_check": true,
+	"cancel_ai_provider_check":           true,
+	"prepare_ai_provider_feature_sample": true, "restore_ai_provider_feature_sample": true,
 }
 
 // nonIdempotentAppendToolNames names tools that add a new row/cell

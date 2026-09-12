@@ -12,6 +12,8 @@ export {
     Kind,
     Operation,
     PermissionStatus,
+    SampleOutcome,
+    SampleStatus,
     Support,
     TransportStatus
 } from "./models.js";
@@ -24,5 +26,7 @@ export type {
     ModelChoice,
     OperationFeature,
     PermissionResult,
-    Report
+    Report,
+    SampleEvidence,
+    SamplePreview
 } from "./models.js";

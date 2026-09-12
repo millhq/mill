@@ -21,6 +21,9 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as markdown$0 from "../../adapters/markdown/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as aiprovider$0 from "../../domain/aiprovider/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as composition$0 from "../../domain/composition/models.js";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -115,6 +118,14 @@ export function NodeTypes(): $CancellablePromise<composition$0.NodeType[] | null
 }
 
 /**
+ * PrepareAIProviderFeatureSample prepares or reopens the one ordinary sample
+ * workflow associated with this provider and operation. It never runs it.
+ */
+export function PrepareAIProviderFeatureSample(providerID: string, operation: aiprovider$0.Operation): $CancellablePromise<aiprovider$0.SamplePreview> {
+    return $Call.ByID(1144755608, providerID, operation);
+}
+
+/**
  * PreviewClipboardApply parses jsonData (clipboard contents) and reports
  * what ConfirmClipboardApply would do WITHOUT persisting anything --
  * docs/goals/0039's preview-confirm model. See ClipboardApplyPreview's
@@ -201,6 +212,14 @@ export function ResetWorkflowToSeed(id: string): $CancellablePromise<composition
  */
 export function RestorableWorkflows(): $CancellablePromise<composition$0.Workflow[] | null> {
     return $Call.ByID(2845480415);
+}
+
+/**
+ * RestoreAIProviderFeatureSample explicitly restores a modified sample's
+ * saved definition while preserving its workflow identity and lifecycle.
+ */
+export function RestoreAIProviderFeatureSample(providerID: string, operation: aiprovider$0.Operation): $CancellablePromise<aiprovider$0.SamplePreview> {
+    return $Call.ByID(4160332279, providerID, operation);
 }
 
 /**

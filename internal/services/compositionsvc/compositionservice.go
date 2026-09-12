@@ -67,11 +67,12 @@ type CompositionService struct {
 	// actor-scoped undo journal (ADR-0044, goal 0404 S1) -- nil until
 	// WireUndoJournal runs (compositionservice_undo.go), which every
 	// test and headless build simply never calls.
-	recordUndo undoRecorder
+	recordUndo        undoRecorder
+	aiProviderSamples *aiProviderSampleCoordinator
 }
 
 func NewCompositionService(store settings.Store) *CompositionService {
-	c := &CompositionService{store: store}
+	c := &CompositionService{store: store, aiProviderSamples: newAIProviderSampleCoordinator(nil)}
 	c.restore()
 	c.migratePublish()
 	return c

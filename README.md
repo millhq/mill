@@ -41,7 +41,7 @@ never phones home.
 - **[Secrets](userdocs/concepts/secrets.md)** — Every field in Mill that needs a password, a token, or a key takes a pick from Secrets, never a typed value — a workflow carries the name of a secret, and Mill fills in the value only at the moment a step runs.
 - **[Extensions](userdocs/concepts/extensions.md)** — An extension adds what Mill can do — a board object, a workflow step, a command, a secret source, a view — as a folder of two files you install, and it runs only with your say-so.
 
-54 step types · 8 board object kinds · 13 extension contribution families · 54 MCP tools
+54 step types · 8 board object kinds · 13 extension contribution families · 56 MCP tools
 
 - **[Automate with agents](userdocs/agents/connect-mcp.md)** — Connecting over MCP and what agents can do.
 - **[The browser extension](userdocs/reference/browser-extension.md)** — Pairing a browser so Mill can replay recorded steps in your own signed-in session.

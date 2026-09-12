@@ -300,6 +300,7 @@ type ExecutionService struct {
 	// now gives this ordering a directly tested second purpose.
 	runStartMu         sync.Mutex
 	aiProviderMutation aiProviderMutationState
+	aiProviderSamples  aiProviderSampleRuntime
 }
 
 // runWorkflow is the one DBOS-registered durable workflow function --
@@ -410,6 +411,7 @@ func (e *ExecutionService) runWorkflowStart(workflowID string, kind RunKind, opt
 	}
 	returnBeforeResult := opts.Stepped || e.mayRequireApproval(wf.ID, nodes) || e.mayWaitForVault(wf.ID, nodes)
 	runID := uuid.NewString()
+	sampleReserved := e.reserveAIProviderSampleRun(wf, nodes, edges, attrs, kind, opts, runID)
 	e.storeResponder(runID, opts.Responder)
 	handle, err := execution.RunWorkflow(e.ctx, e.runWorkflow, runInput{
 		WorkflowID:        wf.ID,
@@ -425,10 +427,14 @@ func (e *ExecutionService) runWorkflowStart(workflowID string, kind RunKind, opt
 		SecretsToken:      opts.SecretsToken,
 		EnvironmentID:     environmentID,
 	}, execution.WithWorkflowID(runID))
+	sampleActivated := e.finishAIProviderSampleGenesis(runID, sampleReserved, err)
 	e.runStartMu.Unlock()
 	if err != nil {
 		e.responders.Delete(runID)
 		return RunSummary{}, fmt.Errorf("start run: %w", err)
+	}
+	if sampleActivated {
+		e.observeAIProviderSampleRun(runID)
 	}
 
 	// Live-sync (goal 0017, docs/adr/0025): announce the new run so an
