@@ -51,6 +51,36 @@ describe('buildPluginAPI command enablement', () => {
     expect(warn).toHaveBeenCalledOnce()
   })
 
+  it('resolves a legacy bare registration through the canonical declaration', () => {
+    const manifest = manifestWith([{
+      id: 'mill-index.refresh', label: 'Refresh', enablement: 'plugin.ready',
+      menu: { path: 'help', group: 1, order: 2 },
+    }])
+    buildPluginAPI(manifest, '1.0.0').registerCommand({ id: 'refresh', label: 'Refresh', run: () => {} })
+    const registered = drainedPluginCommands().find((command) => command.id === 'plugin.mill-index.mill-index.refresh')
+    expect(registered?.menu).toEqual({ path: 'help', group: 1, order: 2 })
+    expect(registered?.enabled?.()).toBe(false)
+    setPluginContextKey(pluginId, 'ready', true)
+    expect(registered?.enabled?.()).toBe(true)
+  })
+
+  it('keeps an exact bare declaration ahead of its canonical counterpart', () => {
+    const manifest = manifestWith([
+      { id: 'refresh', label: 'Legacy refresh', menu: { path: 'help', group: 1, order: 2 } },
+      { id: 'mill-index.refresh', label: 'Canonical refresh', menu: { path: 'atlas', group: 3, order: 4 } },
+    ])
+    buildPluginAPI(manifest, '1.0.0').registerCommand({ id: 'refresh', label: 'Refresh', run: () => {} })
+    const registered = drainedPluginCommands().find((command) => command.id === 'plugin.mill-index.refresh')
+    expect(registered?.menu).toEqual({ path: 'help', group: 1, order: 2 })
+  })
+
+  it('keeps an undeclared bare registration unchanged', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    buildPluginAPI(manifestWith([]), '1.0.0').registerCommand({ id: 'legacyOnly', label: 'Legacy only', run: () => {} })
+    expect(drainedPluginCommands().some((command) => command.id === 'plugin.mill-index.legacyOnly')).toBe(true)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('command "legacyOnly" is not declared'))
+  })
+
   it('accepts the same mixed context values as the framed door and refuses non-finite numbers', () => {
     const api = buildPluginAPI(manifestWith([]), '1.0.0')
     api.context.set('values', ['ready', 0, false, null])

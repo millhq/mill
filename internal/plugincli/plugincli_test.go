@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/alicoding/mill/internal/pluginmigrate"
@@ -35,7 +36,8 @@ func TestRunMigrateJSONEmitsRFC6902PlanWithoutWriting(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
 		t.Fatalf("decode output: %v\n%s", err, out.String())
 	}
-	if plan.PluginID != "mill-bookmark" || plan.MigrationID != pluginmigrate.MigrationID || !plan.HasPatch() || plan.Applied {
+	if plan.FormatVersion != pluginmigrate.PlanFormatVersion || plan.PluginID != "mill-bookmark" ||
+		!slices.Equal(plan.Migrations, []string{pluginmigrate.ConfigurationKeyMigrationID}) || !plan.HasPatch() || plan.Applied {
 		t.Fatalf("plan = %+v", plan)
 	}
 	var operations []map[string]any
@@ -62,6 +64,29 @@ func TestRunMigrateApplyAndCurrentOutput(t *testing.T) {
 	}
 	if !bytes.Contains(out.Bytes(), []byte("This plugin is current.")) {
 		t.Fatalf("second preview output = %q", out.String())
+	}
+}
+
+func TestRunMigratePrintsOrderedCommandPlanWithoutHardCodedSteps(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "mill-index")
+	if err := pluginsvc.CopyPluginFolder(filepath.Join("..", "pluginmigrate", "testdata", "mill-index"), dir); err != nil {
+		t.Fatal(err)
+	}
+	before := read(t, filepath.Join(dir, "manifest.json"))
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"migrate", dir}, filepath.Join(t.TempDir(), "installed"), testMillVersion, &out, &errOut); code != 0 {
+		t.Fatalf("Run exit = %d, stderr = %s", code, errOut.String())
+	}
+	for _, want := range []string{
+		"Plan format: 1", "  - command-namespace", `"path": "/contributes/commands/0/id"`,
+		`"path": "/contributes/tools/0/run/commandId"`, "Run again with --apply",
+	} {
+		if !bytes.Contains(out.Bytes(), []byte(want)) {
+			t.Fatalf("output missing %q:\n%s", want, out.String())
+		}
+	}
+	if after := read(t, filepath.Join(dir, "manifest.json")); !bytes.Equal(after, before) {
+		t.Fatal("human preview wrote the source")
 	}
 }
 

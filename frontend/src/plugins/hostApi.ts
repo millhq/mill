@@ -93,6 +93,14 @@ export function menuForDeclaredCommand(manifest: Manifest, commandId: string): C
 	return { path: declaredMenu.path as MenuPath, group: declaredMenu.group, order: declaredMenu.order }
 }
 
+function resolvedCommandID(manifest: Manifest, registeredID: string): string {
+	const commands = manifest.contributes?.commands ?? []
+	if (commands.some((command) => command.id === registeredID)) return registeredID
+	if (registeredID.includes('.')) return registeredID
+	const canonical = `${manifest.id}.${registeredID}`
+	return commands.some((command) => command.id === canonical) ? canonical : registeredID
+}
+
 export function buildPluginAPI(manifest: Manifest, millVersion: string, storageSnapshot: Record<string, string> = {}): MillPluginAPI {
 	const pluginId = manifest.id
 	const setContext = pluginContextWriter(pluginId)
@@ -330,14 +338,15 @@ export function buildPluginAPI(manifest: Manifest, millVersion: string, storageS
 			return { postMessage: (message: unknown) => getPluginCapture(pluginId, decl.id)?.post?.(message) }
 		},
 		registerCommand: (decl) => {
-			warnUndeclaredCommand(manifest, decl.id)
-			warnInvalidEnablement(manifest, decl.id)
-			const declaredMenu = menuForDeclaredCommand(manifest, decl.id)
-			const enabled = commandHasEnablement(manifest, decl.id, decl.enabled)
-				? () => commandIsEnabled(manifest, decl.id, decl.enabled)
+			const commandID = resolvedCommandID(manifest, decl.id)
+			warnUndeclaredCommand(manifest, commandID)
+			warnInvalidEnablement(manifest, commandID)
+			const declaredMenu = menuForDeclaredCommand(manifest, commandID)
+			const enabled = commandHasEnablement(manifest, commandID, decl.enabled)
+				? () => commandIsEnabled(manifest, commandID, decl.enabled)
 				: undefined
 			collectPluginCommand({
-				id: `plugin.${pluginId}.${decl.id}`,
+				id: `plugin.${pluginId}.${commandID}`,
 				label: decl.label,
 				pluginId,
 				enabled,

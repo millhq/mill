@@ -13,7 +13,11 @@ import (
 	"github.com/tailscale/hujson"
 )
 
-const MigrationID = "configuration-key"
+const (
+	PlanFormatVersion           = 1
+	ConfigurationKeyMigrationID = "configuration-key"
+	CommandNamespaceMigrationID = "command-namespace"
+)
 
 var noPatch = json.RawMessage("[]")
 
@@ -27,14 +31,15 @@ type ManualDecision struct {
 // Plan is the inspectable migration result. Patch is an RFC 6902 document
 // consumed directly by HuJSON.
 type Plan struct {
-	PluginID    string           `json:"pluginId"`
-	MigrationID string           `json:"migrationId,omitempty"`
-	Patch       json.RawMessage  `json:"patch"`
-	Manual      []ManualDecision `json:"manual"`
-	Applied     bool             `json:"applied"`
+	FormatVersion int              `json:"formatVersion"`
+	PluginID      string           `json:"pluginId"`
+	Migrations    []string         `json:"migrations"`
+	Patch         json.RawMessage  `json:"patch"`
+	Manual        []ManualDecision `json:"manual"`
+	Applied       bool             `json:"applied"`
 }
 
-// HasPatch reports whether the plan carries the migration's test and move.
+// HasPatch reports whether the plan carries migration operations.
 func (p Plan) HasPatch() bool { return !bytes.Equal(p.Patch, noPatch) }
 
 // Prepared holds the checked prospective bytes until the caller explicitly
@@ -47,39 +52,60 @@ type Prepared struct {
 	candidate  []byte
 }
 
-// Prepare validates the source boundary and builds the one supported patch.
+// Prepare validates the source boundary and builds the ordered migration patch.
 func Prepare(sourceDir, installedDir, appVersion string) (*Prepared, error) {
 	id, root, raw, value, err := loadSource(sourceDir, installedDir)
 	if err != nil {
 		return nil, err
 	}
-	plan := Plan{PluginID: id, Patch: append(json.RawMessage(nil), noPatch...), Manual: []ManualDecision{}}
+	manifest, err := pluginsvc.DecodeManifest(raw)
+	if err != nil {
+		return nil, fmt.Errorf("decode manifest.json: %w", err)
+	}
+	plan := Plan{
+		FormatVersion: PlanFormatVersion,
+		PluginID:      id,
+		Migrations:    []string{},
+		Patch:         append(json.RawMessage(nil), noPatch...),
+		Manual:        []ManualDecision{},
+	}
+	var operations [][]byte
 	settings, hasSettings, hasConfiguration := configurationMembers(value)
 	if hasSettings && hasConfiguration {
-		plan.MigrationID = MigrationID
+		plan.Migrations = append(plan.Migrations, ConfigurationKeyMigrationID)
 		plan.Manual = append(plan.Manual, ManualDecision{
-			ID: MigrationID, Path: "manifest.json",
+			ID: ConfigurationKeyMigrationID, Path: "/contributes",
 			Summary: "Both contributes.settings and contributes.configuration exist; choose the canonical value.",
 		})
+	} else if hasSettings {
+		plan.Migrations = append(plan.Migrations, ConfigurationKeyMigrationID)
+		operations = append(operations, configurationOperations(settings)...)
+	}
+
+	commandOperations, commandManual, commandMigration := commandNamespaceOperations(id, manifest)
+	if commandMigration {
+		plan.Migrations = append(plan.Migrations, CommandNamespaceMigrationID)
+	}
+	operations = append(operations, commandOperations...)
+	plan.Manual = append(plan.Manual, commandManual...)
+	if len(plan.Manual) > 0 {
 		return &Prepared{Plan: plan, root: root, appVersion: appVersion, original: raw}, nil
 	}
-	if !hasSettings {
+	plan.Patch = patchDocument(operations)
+	if !plan.HasPatch() {
 		if problems := pluginsvc.ConformDirWithManifest(root, raw, appVersion); len(problems) > 0 {
 			return nil, fmt.Errorf("plugin does not conform: %s", strings.Join(problems, "; "))
 		}
 		return &Prepared{Plan: plan, root: root, appVersion: appVersion, original: raw}, nil
 	}
 
-	patch := configurationPatch(settings)
-	candidate, err := patched(value, patch)
+	candidate, err := patched(value, plan.Patch)
 	if err != nil {
 		return nil, err
 	}
 	if problems := pluginsvc.ConformDirWithManifest(root, candidate, appVersion); len(problems) > 0 {
 		return nil, fmt.Errorf("migrated plugin does not conform: %s", strings.Join(problems, "; "))
 	}
-	plan.MigrationID = MigrationID
-	plan.Patch = patch
 	return &Prepared{Plan: plan, root: root, appVersion: appVersion, original: raw, candidate: candidate}, nil
 }
 
@@ -161,18 +187,28 @@ func objectMember(object *hujson.Object, name string) (hujson.Value, bool) {
 	return hujson.Value{}, false
 }
 
-func configurationPatch(settings hujson.Value) json.RawMessage {
-	return json.RawMessage(bytes.Join([][]byte{
-		[]byte(`[{"op":"test","path":"/contributes/settings","value":`),
-		settings.Pack(),
-		[]byte(`},{"op":"move","from":"/contributes/settings","path":"/contributes/configuration"}]`),
-	}, nil))
+func configurationOperations(settings hujson.Value) [][]byte {
+	return [][]byte{
+		bytes.Join([][]byte{
+			[]byte(`{"op":"test","path":"/contributes/settings","value":`),
+			settings.Pack(),
+			[]byte(`}`),
+		}, nil),
+		[]byte(`{"op":"move","from":"/contributes/settings","path":"/contributes/configuration"}`),
+	}
+}
+
+func patchDocument(operations [][]byte) json.RawMessage {
+	if len(operations) == 0 {
+		return append(json.RawMessage(nil), noPatch...)
+	}
+	return json.RawMessage(bytes.Join([][]byte{[]byte("["), bytes.Join(operations, []byte(",")), []byte("]")}, nil))
 }
 
 func patched(value hujson.Value, patch []byte) ([]byte, error) {
 	candidate := value.Clone()
 	if err := candidate.Patch(patch); err != nil {
-		return nil, fmt.Errorf("apply %s patch: %w", MigrationID, err)
+		return nil, fmt.Errorf("apply migration patch: %w", err)
 	}
 	return candidate.Pack(), nil
 }

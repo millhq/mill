@@ -12,7 +12,6 @@ import (
 	"sync"
 
 	"context"
-	"encoding/json"
 	"fmt"
 	"github.com/alicoding/mill/internal/adapters/osopen"
 	"io/fs"
@@ -283,8 +282,8 @@ func (p *PluginService) scanOne(folder string) PluginInfo {
 		info.Error = "manifest.json is missing or unreadable"
 		return info
 	}
-	var m Manifest
-	if err := json.Unmarshal(raw, &m); err != nil {
+	m, err := DecodeManifest(raw)
+	if err != nil {
 		info.Error = "manifest.json is not valid JSON"
 		return info
 	}

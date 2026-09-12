@@ -125,9 +125,19 @@ func entryProblem(root, path, rel string, d fs.DirEntry) (problem string, skipDi
 }
 
 func parseManifest(raw []byte) (Manifest, string) {
-	var m Manifest
-	if err := json.Unmarshal(raw, &m); err != nil {
+	m, err := DecodeManifest(raw)
+	if err != nil {
 		return m, "manifest.json is not valid JSON"
 	}
 	return m, ""
+}
+
+// DecodeManifest applies the strict JSON syntax contract shared by the plugin
+// loader, conformance checks, and source migrations.
+func DecodeManifest(raw []byte) (Manifest, error) {
+	var manifest Manifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return Manifest{}, err
+	}
+	return manifest, nil
 }

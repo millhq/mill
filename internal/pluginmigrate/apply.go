@@ -14,7 +14,7 @@ import (
 // unchanged and has no manual decision.
 func (p *Prepared) Apply() error {
 	if len(p.Plan.Manual) > 0 {
-		return fmt.Errorf("%s needs a manual decision", MigrationID)
+		return fmt.Errorf("migration plan needs a manual decision")
 	}
 	if !p.Plan.HasPatch() {
 		return nil

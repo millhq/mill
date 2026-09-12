@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -21,7 +22,8 @@ func TestPrepareApplyAndSecondPlanOnHistoricalSettingsManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if prepared.Plan.PluginID != "mill-bookmark" || prepared.Plan.MigrationID != MigrationID || !prepared.Plan.HasPatch() {
+	if prepared.Plan.FormatVersion != PlanFormatVersion || prepared.Plan.PluginID != "mill-bookmark" ||
+		!slices.Equal(prepared.Plan.Migrations, []string{ConfigurationKeyMigrationID}) || !prepared.Plan.HasPatch() {
 		t.Fatalf("plan = %+v", prepared.Plan)
 	}
 	assertConfigurationPatch(t, prepared.Plan.Patch)
@@ -68,7 +70,7 @@ func assertSecondPlanIsEmpty(t *testing.T, dir string, after []byte) {
 	if err != nil {
 		t.Fatalf("second Prepare: %v", err)
 	}
-	if second.Plan.HasPatch() || second.Plan.MigrationID != "" {
+	if second.Plan.HasPatch() || len(second.Plan.Migrations) != 0 {
 		t.Fatalf("second plan = %+v, want current", second.Plan)
 	}
 	if err := second.Apply(); err != nil {
@@ -107,7 +109,7 @@ func TestPrepareReportsBothKeysAsManualAndDoesNotWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if len(prepared.Plan.Manual) != 1 || prepared.Plan.Manual[0].ID != MigrationID || prepared.Plan.HasPatch() {
+	if len(prepared.Plan.Manual) != 1 || prepared.Plan.Manual[0].ID != ConfigurationKeyMigrationID || prepared.Plan.HasPatch() {
 		t.Fatalf("plan = %+v", prepared.Plan)
 	}
 	if err := prepared.Apply(); err == nil {
@@ -115,6 +117,27 @@ func TestPrepareReportsBothKeysAsManualAndDoesNotWrite(t *testing.T) {
 	}
 	if after := readManifest(t, dir); !bytes.Equal(after, before) {
 		t.Fatal("manual decision changed manifest.json")
+	}
+}
+
+func TestManualDecisionSuppressesOtherwiseSafeOperations(t *testing.T) {
+	dir := writePlugin(t, `{
+  "id": "mixed-plan",
+  "contributes": {
+    "settings": [],
+    "commands": [
+      {"id": "refresh", "label": "Refresh"},
+      {"id": "mixed-plan.refresh", "label": "Refresh canonical"}
+    ]
+  }
+}`)
+	prepared, err := Prepare(dir, filepath.Join(t.TempDir(), "installed"), testMillVersion)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if !slices.Equal(prepared.Plan.Migrations, []string{ConfigurationKeyMigrationID, CommandNamespaceMigrationID}) ||
+		len(prepared.Plan.Manual) == 0 || prepared.Plan.HasPatch() {
+		t.Fatalf("plan = %+v", prepared.Plan)
 	}
 }
 
@@ -128,6 +151,32 @@ func TestPrepareRefusesMalformedJSON(t *testing.T) {
 	}
 	if _, err := Prepare(dir, filepath.Join(t.TempDir(), "installed"), testMillVersion); err == nil {
 		t.Fatal("Prepare accepted malformed JSON")
+	}
+}
+
+func TestPrepareRejectsHuJSONExtensionsLikeTheLoader(t *testing.T) {
+	tests := map[string]func([]byte) []byte{
+		"comment": func(raw []byte) []byte {
+			return bytes.Replace(raw, []byte(`"id":`), []byte("// extension syntax\n  \"id\":"), 1)
+		},
+		"trailing comma": func(raw []byte) []byte {
+			return bytes.Replace(raw, []byte("\n}"), []byte(",\n}"), 1)
+		},
+	}
+	for name, extend := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := copyCommandFixture(t)
+			path := filepath.Join(dir, "manifest.json")
+			if err := os.WriteFile(path, extend(readManifest(t, dir)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Prepare(dir, filepath.Join(t.TempDir(), "installed"), testMillVersion); err == nil {
+				t.Fatal("Prepare accepted syntax rejected by the plugin loader")
+			}
+			if problems := pluginsvc.ConformDir(dir, testMillVersion); !slices.Contains(problems, "manifest.json is not valid JSON") {
+				t.Fatalf("ConformDir problems = %v", problems)
+			}
+		})
 	}
 }
 
@@ -173,7 +222,7 @@ func TestHuJSONPatchPreservesOwnedCommentsAndUnrelatedLayout(t *testing.T) {
 	if !present || canonical {
 		t.Fatal("settings member was not found")
 	}
-	patch := configurationPatch(settings)
+	patch := patchDocument(configurationOperations(settings))
 	got, err := patched(value, patch)
 	if err != nil {
 		t.Fatal(err)

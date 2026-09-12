@@ -139,6 +139,13 @@ func namespacedCommandID(pluginID, id string) bool {
 	return hasPrefix && commandVerbPattern.MatchString(verb)
 }
 
+// IsNamespacedCommandID reports whether id is a canonical command identity
+// owned by pluginID. Authoring migrations reuse the loader's grammar through
+// this predicate instead of maintaining another command-ID definition.
+func IsNamespacedCommandID(pluginID, id string) bool {
+	return namespacedCommandID(pluginID, id)
+}
+
 func validateTools(c ManifestContributes) string {
 	seen := map[string]bool{}
 	for _, t := range c.Tools {

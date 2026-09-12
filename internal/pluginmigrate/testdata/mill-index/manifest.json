@@ -1,0 +1,38 @@
+{
+  "id": "mill-index",
+  "name": "Board index",
+  "version": "1.0.0",
+  "description": "Lists everything on the board by kind, and keeps the list current as the board changes.",
+  "author": "Mill examples",
+  "minMillVersion": "0.9.0",
+  "icon": "icon.png",
+  "capabilities": [],
+  "contributes": {
+    "canvasObjects": [
+      {
+        "kind": "index"
+      }
+    ],
+    "commands": [
+      {
+        "id": "refresh",
+        "label": "Refresh the board index"
+      }
+    ],
+    "tools": [
+      {
+        "name": "refresh_board_index",
+        "description": "Lists the board again in every board index on the canvas.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        },
+        "effect": "read",
+        "run": {
+          "kind": "command",
+          "commandId": "refresh"
+        }
+      }
+    ]
+  }
+}

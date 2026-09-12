@@ -2,6 +2,7 @@
 package plugincli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -84,6 +85,24 @@ func writePlan(out io.Writer, plan pluginmigrate.Plan, asJSON bool) {
 		return
 	}
 	_, _ = fmt.Fprintf(out, "Plugin: %s\n", plan.PluginID)
+	_, _ = fmt.Fprintf(out, "Plan format: %d\n", plan.FormatVersion)
+	if len(plan.Migrations) == 0 && len(plan.Manual) == 0 {
+		_, _ = fmt.Fprintln(out, "This plugin is current.")
+		return
+	}
+	if len(plan.Migrations) > 0 {
+		_, _ = fmt.Fprintln(out, "Migrations:")
+		for _, migration := range plan.Migrations {
+			_, _ = fmt.Fprintf(out, "  - %s\n", migration)
+		}
+	}
+	if plan.HasPatch() {
+		var formatted bytes.Buffer
+		if err := json.Indent(&formatted, plan.Patch, "  ", "  "); err == nil {
+			_, _ = fmt.Fprintln(out, "RFC 6902 patch:")
+			_, _ = fmt.Fprintln(out, formatted.String())
+		}
+	}
 	if len(plan.Manual) > 0 {
 		_, _ = fmt.Fprintf(out, "Manual decisions: %d\n", len(plan.Manual))
 		for _, decision := range plan.Manual {
@@ -91,14 +110,6 @@ func writePlan(out io.Writer, plan pluginmigrate.Plan, asJSON bool) {
 		}
 		return
 	}
-	if !plan.HasPatch() {
-		_, _ = fmt.Fprintln(out, "This plugin is current.")
-		return
-	}
-	_, _ = fmt.Fprintf(out, "Migration: %s\n", plan.MigrationID)
-	_, _ = fmt.Fprintln(out, "RFC 6902 patch:")
-	_, _ = fmt.Fprintln(out, "  test /contributes/settings")
-	_, _ = fmt.Fprintln(out, "  move /contributes/settings -> /contributes/configuration")
 	if plan.Applied {
 		_, _ = fmt.Fprintln(out, "Applied to manifest.json.")
 	} else {
