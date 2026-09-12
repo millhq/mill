@@ -9,7 +9,7 @@ import (
 // request either method here can cause, and only ever because the user
 // chose the action -- the constraint in docs/SPEC.md §1.1 forbids
 // unprompted outbound traffic, not a link the user clicked.
-const issueTrackerURL = "https://github.com/alicoding/mill/issues/new"
+const issueTrackerURL = "https://github.com/millhq/mill/issues/new"
 
 // ReportIssue opens the issue tracker in the user's default browser.
 func (s *SettingsService) ReportIssue() error {

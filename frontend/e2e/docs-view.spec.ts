@@ -131,7 +131,7 @@ test('the nav footer carries an external Releases link', async ({ page, baseURL 
   await page.getByTestId('footer-docs-link').click()
   const link = page.getByTestId('docs-releases-link')
   await expect(link).toBeVisible()
-  await expect(link).toHaveAttribute('href', 'https://github.com/alicoding/mill/releases')
+  await expect(link).toHaveAttribute('href', 'https://github.com/millhq/mill/releases')
   await expect(link).toHaveText('Releases')
 })
 
@@ -255,7 +255,7 @@ test("a code block's copy button copies the raw code and confirms briefly", asyn
 
     await expect
       .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-      .toContain('git clone https://github.com/alicoding/mill.git')
+      .toContain('git clone https://github.com/millhq/mill.git')
     await expect(copyButton).toHaveAccessibleName('Copied')
   })
 })

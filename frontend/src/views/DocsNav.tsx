@@ -6,7 +6,7 @@ import { openExternalUrl } from '../shared/openExternal'
 import styles from './DocsView.module.css'
 
 // The same distribution the updater reads (UpdatesSection.tsx).
-const RELEASES_URL = 'https://github.com/alicoding/mill/releases'
+const RELEASES_URL = 'https://github.com/millhq/mill/releases'
 
 interface DocsNavProps {
   groups: DocsGroup[]

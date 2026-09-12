@@ -10,7 +10,7 @@ Either way you end up with one binary — no hosted service, no account.
 ## From a release (macOS)
 
 1. Download the newest `.zip` from the
-   [releases page](https://github.com/alicoding/mill/releases) — beta
+   [releases page](https://github.com/millhq/mill/releases) — beta
    releases carry every merged change; stable releases are tagged.
 2. Unzip and drag `mill.app` to Applications.
 3. First launch: the app is not notarized, so macOS shows "Apple could
@@ -41,7 +41,7 @@ Either way you end up with one binary — no hosted service, no account.
 ## From source
 
 ```
-git clone https://github.com/alicoding/mill.git
+git clone https://github.com/millhq/mill.git
 cd mill
 task install:app
 ```

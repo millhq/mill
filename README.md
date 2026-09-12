@@ -14,7 +14,7 @@
 
 A guardrailed desktop workbench for automations, a knowledge board and connectors — what you see is what your AI sees.
 
-[![CI](https://github.com/alicoding/mill/actions/workflows/ci.yml/badge.svg)](https://github.com/alicoding/mill/actions/workflows/ci.yml)
+[![CI](https://github.com/millhq/mill/actions/workflows/ci.yml/badge.svg)](https://github.com/millhq/mill/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/alicoding/mill/badge)](https://scorecard.dev/viewer/?uri=github.com/alicoding/mill)
 [![License](https://img.shields.io/github/license/alicoding/mill)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white)](go.mod)
@@ -58,7 +58,7 @@ You need Go, Node, the [Task](https://taskfile.dev) CLI, and the Wails
 v3 CLI (`go install github.com/wailsapp/wails/v3/cmd/wails3@latest`).
 
 ```sh
-git clone https://github.com/alicoding/mill.git
+git clone https://github.com/millhq/mill.git
 cd mill
 task setup:hooks    # once: installs the pre-commit hooks that mirror CI
 task install:app    # builds Mill and installs it in /Applications
@@ -66,7 +66,7 @@ task install:app    # builds Mill and installs it in /Applications
 
 `task dev` runs a hot-reloading development copy instead of installing.
 Prebuilt macOS releases are on the
-[releases page](https://github.com/alicoding/mill/releases); the
+[releases page](https://github.com/millhq/mill/releases); the
 [Install](userdocs/start-here/install.md) page covers both routes and
 where your data lives.
 
@@ -91,7 +91,7 @@ one file.
 ## Contributing
 
 File bugs and feature requests as
-[issues](https://github.com/alicoding/mill/issues); the bug template asks
+[issues](https://github.com/millhq/mill/issues); the bug template asks
 for the build badge the app shows, which tells us exactly which build you
 ran. Pull requests are welcome through the process in
 [CONTRIBUTING.md](CONTRIBUTING.md). Report a vulnerability privately, as

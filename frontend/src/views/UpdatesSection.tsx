@@ -14,7 +14,7 @@ import { TrustDisclosure } from './TrustDisclosure'
 // same URL works in a browser tab -- observed live on a corporate
 // proxy). The releases page is the same distribution the updater
 // itself reads.
-const RELEASES_URL = 'https://github.com/alicoding/mill/releases'
+const RELEASES_URL = 'https://github.com/millhq/mill/releases'
 import styles from '../shared/ListCard.module.css'
 import monoStyles from '../shared/monoText.module.css'
 import { background } from '../shared/background'

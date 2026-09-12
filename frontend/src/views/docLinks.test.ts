@@ -6,8 +6,8 @@ import { resolveDocLink } from './docLinks'
 // resolved deliberately.
 describe('resolveDocLink', () => {
   it('classifies absolute URLs as external', () => {
-    expect(resolveDocLink('start-here/install.md', 'https://github.com/alicoding/mill/releases'))
-      .toEqual({ kind: 'external', url: 'https://github.com/alicoding/mill/releases' })
+    expect(resolveDocLink('start-here/install.md', 'https://github.com/millhq/mill/releases'))
+      .toEqual({ kind: 'external', url: 'https://github.com/millhq/mill/releases' })
   })
 
   it('resolves a parent-relative .md cross-link against the current page directory', () => {

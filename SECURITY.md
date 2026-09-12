@@ -5,7 +5,7 @@
 Please report security vulnerabilities through GitHub's private
 vulnerability reporting, not a public issue:
 
-**[Report a vulnerability](https://github.com/alicoding/mill/security/advisories/new)**
+**[Report a vulnerability](https://github.com/millhq/mill/security/advisories/new)**
 (Security tab → "Report a vulnerability")
 
 This opens a private advisory visible only to you and the maintainer, so

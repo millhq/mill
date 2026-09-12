@@ -12,7 +12,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/alicoding/mill.git",
+    "url": "git+https://github.com/millhq/mill.git",
     "directory": "frontend/plugin-sdk"
   }
 }

@@ -10,7 +10,7 @@ info:
   productIdentifier: "com.alicoding.mill" # The unique product identifier
   description: "Guardrailed agentic-workflow automation" # The application description
   copyright: "© 2026 Ali Al Dallal" # Copyright text
-  comments: "https://github.com/alicoding/mill" # Comments
+  comments: "https://github.com/millhq/mill" # Comments
   version: "0.5.0" # The application version
   # cfBundleIconName: "appicon" # The macOS icon name in Assets.car icon bundles (optional)
   #                               # Should match the name of your .icon file without the extension

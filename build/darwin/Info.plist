@@ -5,7 +5,7 @@
 		<key>CFBundleExecutable</key>
 		<string>mill</string>
 		<key>CFBundleGetInfoString</key>
-		<string>https://github.com/alicoding/mill</string>
+		<string>https://github.com/millhq/mill</string>
 		<key>CFBundleIconFile</key>
 		<string>icons</string>
 		<key>CFBundleIconName</key>
