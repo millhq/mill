@@ -59,6 +59,19 @@ describe('canvas drafts', () => {
     expect(drafts()[draft.id]).toBeUndefined()
   })
 
+  it('opens the undo mark before issuing the placement mutation', async () => {
+    let openMark: (() => void) | undefined
+    beginUndoMark.mockImplementationOnce(() => new Promise<void>((resolve) => { openMark = resolve }))
+    const place = placement()
+    const draft = createDraft('mill-drawing', 'shape', CREATE, place)
+    const commit = commitDraft('mill-drawing', draft.id, false)
+    await Promise.resolve()
+    expect(place.place).not.toHaveBeenCalled()
+    openMark?.()
+    await commit
+    expect(place.place).toHaveBeenCalledTimes(1)
+  })
+
   // Closing the mark refreshes the board, and a selection made before
   // that refresh does not survive it -- the placed shape would come
   // back unselected, with no resize handles to grab.

@@ -40,7 +40,7 @@ export interface CanvasToolDoorContext {
   manifest: Manifest
   // post delivers one host->frame event to THIS plugin's activation
   // frame; the bridge owns the frame handle and supplies it.
-  post: (event: string, payload: unknown) => void
+  post: (event: string, payload: unknown) => void | Promise<void>
 }
 
 // erasing is capability-gated exactly as the same-DOM ctx is: without

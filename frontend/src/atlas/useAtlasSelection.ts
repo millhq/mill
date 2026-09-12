@@ -4,6 +4,10 @@ import type { BoardObject, Card, Note } from '../../bindings/github.com/alicodin
 import { useAtlasSelectionStore } from '../shared/atlasSelectionStore'
 import type { ResolvedBoardEdge } from './atlasLinkResolution'
 
+function retainEqualIDs(current: string[], next: string[]): string[] {
+  return current.length === next.length && current.every((id, i) => id === next[i]) ? current : next
+}
+
 // Multi-selection state + the two context-menu paths that read it
 // (goal 0081; split from AtlasBoard.tsx along the selection seam at
 // the 500-line convention).
@@ -40,6 +44,12 @@ export function useAtlasSelection({ cards, notes, objects, arteries, spaceId, on
 }) {
   const selectedIDsRef = useRef<string[]>([])
   const contextSelectionRef = useRef<string[]>([])
+  // A programmatic selection crosses two controlled-state renders: the
+  // selection mirror updates first, then AtlasBoard applies selected:true to
+  // React Flow's rebuilt node. React Flow can report an intermediate empty
+  // selection between those renders. Keep that transport-only report from
+  // erasing the selection before the selected node is acknowledged.
+  const pendingProgrammaticIDRef = useRef<string | null>(null)
   // Reactive split (owner-caught follow-up to goal 0092): the
   // selection tray and every node type's outline need to re-render on
   // a selection change, unlike the ref-only menu logic above (which
@@ -68,13 +78,19 @@ export function useAtlasSelection({ cards, notes, objects, arteries, spaceId, on
   // never a per-node effect (goal 0161's render-count law).
   const onSelectionChange: OnSelectionChangeFunc = useCallback(({ nodes: selected, edges }) => {
     const ids = selected.map((n) => n.id)
+    const pendingID = pendingProgrammaticIDRef.current
+    if (pendingID !== null && ids.length === 0) return
+    pendingProgrammaticIDRef.current = null
     selectedIDsRef.current = ids
     const selectedCardIDs = ids.filter((id) => cards.some((c) => c.ID === id))
     const selectedNoteIDs = ids.filter((id) => notes.some((n) => n.ID === id))
     const selectedObjectIDs = ids.filter((id) => objects.some((o) => o.ID === id))
-    setSelectedCards(selectedCardIDs)
-    setSelectedNotes(selectedNoteIDs)
-    setSelectedObjects(selectedObjectIDs)
+    // React Flow reports again when a controlled nodes array changes.
+    // Keep the existing state references when membership did not change
+    // so that report cannot create a render -> nodes -> report loop.
+    setSelectedCards((current) => retainEqualIDs(current, selectedCardIDs))
+    setSelectedNotes((current) => retainEqualIDs(current, selectedNoteIDs))
+    setSelectedObjects((current) => retainEqualIDs(current, selectedObjectIDs))
     const links = edges.map((e) => e.id).filter((id) => arteries.some((a) => a.id === id && a.count === 1))
     useAtlasSelectionStore.getState().setSelection({ spaceId, cards: selectedCardIDs, notes: selectedNoteIDs, objects: selectedObjectIDs, links })
   }, [cards, notes, objects, arteries, spaceId])
@@ -86,6 +102,7 @@ export function useAtlasSelection({ cards, notes, objects, arteries, spaceId, on
   // affordance): resets every split so a stale ref can't reopen a
   // menu against members that no longer read as selected.
   const clearSelection = useCallback(() => {
+    pendingProgrammaticIDRef.current = null
     selectedIDsRef.current = []
     setSelectedCards([])
     setSelectedNotes([])
@@ -101,6 +118,7 @@ export function useAtlasSelection({ cards, notes, objects, arteries, spaceId, on
   // node-rebuild effect to re-read selectedIDsRef.current even though
   // allNodes itself may not have changed since the object was created.
   const selectObject = useCallback((id: string) => {
+    pendingProgrammaticIDRef.current = id
     selectedIDsRef.current = [id]
     setSelectedCards([])
     setSelectedNotes([])
@@ -115,6 +133,7 @@ export function useAtlasSelection({ cards, notes, objects, arteries, spaceId, on
   // split (selectedNotes vs selectedObjects) stays correct for the
   // note's own delete/group affordances.
   const selectNote = useCallback((id: string) => {
+    pendingProgrammaticIDRef.current = id
     selectedIDsRef.current = [id]
     setSelectedCards([])
     setSelectedNotes([id])

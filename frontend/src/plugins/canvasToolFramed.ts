@@ -42,7 +42,7 @@ export interface FramedToolRuntime {
   descriptor: CanvasToolDescriptor
   // post delivers one host->frame event; supplied by the activation
   // bridge, which owns the frame handle.
-  post: (event: string, payload: unknown) => void
+  post: (event: string, payload: unknown) => void | Promise<void>
   session: FramedToolSession | null
   // The gesture that just ended, kept until the next one opens: a
   // tool's answer to pointer-up arrives a round trip LATER, by which
@@ -97,8 +97,8 @@ function targetObjectAt(ctx: AtlasGestureCtx, board: { x: number; y: number }): 
 
 const NO_MODIFIERS = { shift: false, alt: false, ctrl: false, meta: false } as const
 
-function sendPointer(runtime: FramedToolRuntime, phase: ToolPointerPayload['phase'], point: CanvasToolPoint, coalesced: CanvasToolPoint[], zoom: number, modifiers: ToolPointerPayload['modifiers'], target?: string): void {
-  runtime.post('tool.pointer', {
+function sendPointer(runtime: FramedToolRuntime, phase: ToolPointerPayload['phase'], point: CanvasToolPoint, coalesced: CanvasToolPoint[], zoom: number, modifiers: ToolPointerPayload['modifiers'], target?: string): void | Promise<void> {
+  return runtime.post('tool.pointer', {
     toolId: runtime.descriptor.kind,
     phase, point, coalesced, modifiers, zoom,
     styleValues: currentStyleValues(runtime.descriptor),
@@ -120,7 +120,7 @@ function flushMoves(runtime: FramedToolRuntime): void {
   if (pending.length === 0) return
   session.pending = []
   const point = pending[pending.length - 1]
-  sendPointer(runtime, 'move', point, pending.slice(0, -1), session.zoom, session.modifiers, targetObjectAt(session.ctx, point))
+  void sendPointer(runtime, 'move', point, pending.slice(0, -1), session.zoom, session.modifiers, targetObjectAt(session.ctx, point))
 }
 
 function scheduleFlush(runtime: FramedToolRuntime): void {
@@ -254,12 +254,16 @@ function declFromDescriptor(d: CanvasToolDescriptor, renderFace?: CanvasObjectDe
 // gated on the shared drag threshold exactly as it is there.
 function framedGesture(runtime: FramedToolRuntime, sticky: boolean): AtlasToolGesture {
   return {
+    // Persisted tools commit their draft through canvasDrafts, which owns
+    // the actor mark across the bridge round trip. Ephemeral tools place no
+    // draft; an eraser's host mutation therefore needs the engine mark.
+    ownsUndo: !runtime.descriptor.ephemeral,
     onPoint: (pt, ctx) => {
       const point = boardPoint(ctx, pt)
       if (!runtime.session) {
         runtime.lastSession = null
         runtime.session = { ctx, pending: [], frame: null, zoom: boardZoom(ctx), modifiers: ctx.modifiers }
-        sendPointer(runtime, 'down', point, [], runtime.session.zoom, ctx.modifiers, targetObjectAt(ctx, point))
+        void sendPointer(runtime, 'down', point, [], runtime.session.zoom, ctx.modifiers, targetObjectAt(ctx, point))
         return
       }
       runtime.session.ctx = ctx
@@ -274,8 +278,14 @@ function framedGesture(runtime: FramedToolRuntime, sticky: boolean): AtlasToolGe
         flushMoves(runtime)
         const last = points[points.length - 1]
         const point = last ? boardPoint(ctx, last) : { x: 0, y: 0, t: performance.now() }
-        sendPointer(runtime, 'up', point, [], session.zoom, ctx.modifiers, targetObjectAt(ctx, point))
+        const completion = sendPointer(runtime, 'up', point, [], session.zoom, ctx.modifiers, targetObjectAt(ctx, point))
+        // An ephemeral same-document tool serializes pointer handlers and
+        // returns that queue here. Keep its session available until queued
+        // move doors finish; otherwise eraseAt sees an ended gesture. Persisted
+        // tools and framed posts preserve their existing immediate handoff.
+        if (completion && runtime.descriptor.ephemeral) return completion.finally(() => endSession(runtime))
         endSession(runtime)
+        return completion
       } finally {
         if (!sticky && meetsDragThreshold(points)) ctx.disarmUnlessLocked()
       }
@@ -283,10 +293,10 @@ function framedGesture(runtime: FramedToolRuntime, sticky: boolean): AtlasToolGe
     onCancel: () => {
       const session = runtime.session
       if (!session) return
-      sendPointer(runtime, 'cancel', { x: 0, y: 0, t: performance.now() }, [], session.zoom, NO_MODIFIERS)
+      void sendPointer(runtime, 'cancel', { x: 0, y: 0, t: performance.now() }, [], session.zoom, NO_MODIFIERS)
       endSession(runtime)
     },
-    onFade: (now) => sendPointer(runtime, 'fade', { x: 0, y: 0, t: now }, [], 1, NO_MODIFIERS),
+    onFade: (now) => { void sendPointer(runtime, 'fade', { x: 0, y: 0, t: now }, [], 1, NO_MODIFIERS) },
     fadeMs: runtime.descriptor.fadeMs,
   }
 }
@@ -294,7 +304,7 @@ function framedGesture(runtime: FramedToolRuntime, sticky: boolean): AtlasToolGe
 // buildFramedTool is registerCanvasTool's host side: one descriptor in,
 // one registry noun out, with the declared preview taking the overlay
 // slot a same-DOM tool's renderPreview would have taken.
-export function buildFramedTool(pluginId: string, manifest: Manifest, descriptor: CanvasToolDescriptor, post: (event: string, payload: unknown) => void, renderFace?: CanvasObjectDecl['renderFace'], frameRegistration?: { entry?: string }): ThirdPartyNounShape {
+export function buildFramedTool(pluginId: string, manifest: Manifest, descriptor: CanvasToolDescriptor, post: (event: string, payload: unknown) => void | Promise<void>, renderFace?: CanvasObjectDecl['renderFace'], frameRegistration?: { entry?: string }): ThirdPartyNounShape {
   const runtime: FramedToolRuntime = { pluginId, descriptor, post, session: null, lastSession: null }
   const noun = buildThirdPartyNoun(pluginId, manifest, declFromDescriptor(descriptor, renderFace), frameRegistration)
   runtimes.set(runtimeKey(pluginId, descriptor.kind), runtime)

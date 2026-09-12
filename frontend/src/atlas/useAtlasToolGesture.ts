@@ -187,10 +187,10 @@ export function useAtlasToolGesture({ tool, readOnly, isFree, ctx, wrapperRef }:
     e.preventDefault()
     const g = gestureRef.current
     // A gesture (stroke, eraser) undoes as ONE step regardless of how
-    // many entities it touches (ADR-0044 decision 2, goal 0219 S2) --
-    // opened here at the 0215 gesture engine's own start boundary,
-    // closed in onPointerUpCore's end boundary below.
-    markOpenRef.current = AtlasService.BeginUndoMark()
+    // many entities it touches (ADR-0044 decision 2, goal 0219 S2).
+    // Canvas-draft tools own the commit mark because their commit may
+    // arrive after pointer-up; every other gesture uses this boundary.
+    markOpenRef.current = g?.ownsUndo ? null : AtlasService.BeginUndoMark()
     drawingRef.current = true
     scratchRef.current = { cardIDs: new Set(), noteIDs: new Set(), objectIDs: new Set() }
     fadeMsRef.current = g?.fadeMs
@@ -228,14 +228,21 @@ export function useAtlasToolGesture({ tool, readOnly, isFree, ctx, wrapperRef }:
     drawingRef.current = false
     const clientPoints = clientPointsRef.current
     const g = gestureRef.current
-    // onEnd stays SYNCHRONOUS (its ctx reads scratchRef/points state
-    // that this function clears right below -- deferring the call
-    // would read already-cleared state). The mark only needs to stay
-    // open until onEnd's own AtlasService calls are ISSUED, which
-    // happens synchronously within this call; EndUndoMark fires right
-    // after, once BeginUndoMark's own open has resolved.
-    g?.onEnd(clientPoints, buildCtx())
-    void markOpenRef.current?.then(() => AtlasService.EndUndoMark())
+    // Invoke onEnd synchronously because its ctx reads scratchRef and
+    // points state cleared below. For engine-owned gestures, keep the
+    // mark open until async work settles. Canvas-draft tools have no
+    // engine mark here; their commit path closes its own mark before
+    // applying selection.
+    const mark = markOpenRef.current
+    try {
+      const completion = g?.onEnd(clientPoints, buildCtx())
+      void Promise.resolve(completion)
+        .catch((error: unknown) => console.error('atlas tool gesture failed', error))
+        .finally(() => { void mark?.then(() => AtlasService.EndUndoMark()) })
+    } catch (error) {
+      void mark?.then(() => AtlasService.EndUndoMark())
+      throw error
+    }
     markOpenRef.current = null
     clientPointsRef.current = []
     scratchRef.current = null

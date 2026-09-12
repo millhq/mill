@@ -119,12 +119,11 @@ export async function commitDraft(pluginId: string, id: string, select: boolean)
   placements.delete(id)
   useCanvasDrafts.getState().drop(id)
   if (!place) return null
-  const mark = AtlasService.BeginUndoMark()
+  await AtlasService.BeginUndoMark()
   let placed: string | null
   try {
     placed = await place.place(draft)
   } finally {
-    await mark
     await AtlasService.EndUndoMark()
   }
   // After the mark, never inside it: a selection made before it closes
