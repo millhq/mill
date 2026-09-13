@@ -9,6 +9,10 @@ left off instead of vanishing. Open the workflow's **Runs** tab
 afterward and every run is there step by step — inputs, outputs,
 timing, and exactly where it stopped.
 
+When a step fails after producing output, Mill keeps that output beside
+the error. **Run from clipboard** shows the failed result and lets you
+copy it manually with **Copy result**.
+
 ## When a run needs a person
 
 **Review** is the one queue for everything waiting on you:

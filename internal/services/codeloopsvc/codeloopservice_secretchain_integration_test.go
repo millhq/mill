@@ -208,3 +208,31 @@ func TestRunCommandBlock_TypedSecret_NeverAppearsInSavedRunRecord(t *testing.T) 
 		t.Errorf("step.Output = %q, want the echoed typed value scrubbed to the redaction placeholder", step.Output)
 	}
 }
+
+func TestRunCommandBlock_FailedTypedSecretOutputStaysRedacted(t *testing.T) {
+	exec, codeLoop, _ := newWiredStack(t)
+
+	const fixtureValue = "failed-typed-secret-fixture-should-never-be-saved"
+	summary, err := codeLoop.RunCommandBlock(
+		composition.CodingLoopWorkflowID,
+		`printf 'typed=%s\n' "$CODING_LOOP_FAILED_SECRET_FIXTURE"; exit 7`,
+		map[string]string{"CODING_LOOP_FAILED_SECRET_FIXTURE": fixtureValue},
+	)
+	if err != nil {
+		t.Fatalf("RunCommandBlock: %v", err)
+	}
+	detail := runAndApprove(t, exec, summary)
+	if detail.Status != "ERROR" {
+		t.Fatalf("detail status = %q, want ERROR (error: %q)", detail.Status, detail.Error)
+	}
+	step := shellStepOf(t, detail)
+	if step.Status != "failed" {
+		t.Fatalf("step status = %q, want failed (error: %q)", step.Status, step.Error)
+	}
+	if strings.Contains(step.Output, fixtureValue) || strings.Contains(detail.Output, fixtureValue) {
+		t.Fatalf("failed output retained a raw typed secret: step=%q detail=%q", step.Output, detail.Output)
+	}
+	if !strings.Contains(step.Output, secret.RedactedPlaceholder) || !strings.Contains(detail.Output, secret.RedactedPlaceholder) {
+		t.Errorf("failed output = step %q / detail %q, want the redaction placeholder in both", step.Output, detail.Output)
+	}
+}

@@ -103,6 +103,9 @@ func TestGetRun_MultiStepInput_PopulatedAndChained(t *testing.T) {
 	if injectStep.Output != want {
 		t.Errorf("process-inject-text step Output = %q, want %q", injectStep.Output, want)
 	}
+	if detail.Output != want {
+		t.Errorf("successful detail Output = %q, want unchanged terminal output %q", detail.Output, want)
+	}
 }
 
 // TestGetRun_CompletedAt_SetOnExecutedStepsOnly is goal 0350 S3's own

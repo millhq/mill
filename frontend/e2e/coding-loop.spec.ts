@@ -7,6 +7,7 @@ import { CODING_LOOP_MCP_BASE_PORT, CODING_LOOP_SERVER_BASE_PORT, spawnMillServe
 import { withClipboardLock } from './fixtures/clipboardLock'
 import { writeHostClipboardText, hostClipboardAvailable } from './fixtures/hostClipboard'
 import { paletteDialog } from './fixtures/palette'
+import { callBindingViaRPC } from './fixtures/wailsRpc'
 
 // The coding loop end-to-end (docs/goals/0240 S1): copy a shell command
 // block, hit the hotkey/palette, confirm the parsed structure, watch it
@@ -55,6 +56,7 @@ async function setUp(testInfo: { parallelIndex: number }): Promise<Fixture> {
   })
   const browser = await chromium.launch()
   const context = await browser.newContext({ baseURL: server.baseURL })
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const page = await context.newPage()
   await applyCpuThrottle(page)
   await page.goto(`${server.baseURL}/`)
@@ -118,6 +120,68 @@ test('Coding loop: capture, confirm, run, and copy back the result', async ({}, 
       // --- Copy result: one click, the real clipboard now holds it ---
       await page.getByTestId('coding-loop-result-copy').click()
       await expect(page.getByTestId('coding-loop-result-copy')).toContainText('Copied')
+    })
+  } finally {
+    await tearDown(f)
+  }
+})
+
+// eslint-disable-next-line no-empty-pattern -- needs `testInfo`, not any fixture.
+test('Coding loop: failed output stays visible and Copy result copies that exact result', async ({}, testInfo) => {
+  const f = await setUp(testInfo)
+  try {
+    await withClipboardLock(async () => {
+      const { page } = f
+      const marker = 'coding-loop-failed-output-marker'
+      writeHostClipboardText(`printf '${marker}\\n'; exit 7`)
+
+      await page.goto('/')
+      await expect(page.getByRole('link', { name: 'Home' })).toBeVisible()
+      await page.keyboard.press('Meta+K')
+      await expect(paletteDialog(page)).toBeVisible()
+      await paletteDialog(page).getByRole('combobox').fill('run from clipboard')
+      await paletteDialog(page).getByRole('option', { name: 'Run from clipboard…', exact: true }).click()
+
+      if (!hostClipboardAvailable) {
+        await expect(page.getByTestId('coding-loop-read-error')).toBeVisible({ timeout: 10_000 })
+        return
+      }
+
+      await expect(page.getByTestId('coding-loop-confirm')).toBeVisible({ timeout: 10_000 })
+      await page.getByTestId('coding-loop-confirm-run').click()
+
+      const result = page.getByTestId('coding-loop-result')
+      await expect(result).toBeVisible({ timeout: 20_000 })
+      await expect(page.getByTestId('coding-loop-result-banner')).toContainText('Failed')
+      const output = page.getByTestId('coding-loop-result-output')
+      await expect(output).toHaveAttribute('aria-label', 'Failed')
+      await expect(output).toContainText(marker)
+
+      const workflows = await callBindingViaRPC<Array<{ ID: string; Label: string }>>(
+        page,
+        'github.com/alicoding/mill/internal/services/compositionsvc.CompositionService.Workflows',
+        [],
+      )
+      const workflow = workflows.find((candidate) => candidate.Label === 'Run from clipboard')
+      if (!workflow) throw new Error('Run from clipboard seed is missing')
+      const runs = await callBindingViaRPC<Array<{ runID: string }>>(
+        page,
+        'github.com/alicoding/mill/internal/services/executionsvc.ExecutionService.ListRunsForWorkflow',
+        [workflow.ID],
+      )
+      expect(runs).toHaveLength(1)
+      const detail = await callBindingViaRPC<{ status: string; output: string }>(
+        page,
+        'github.com/alicoding/mill/internal/services/executionsvc.ExecutionService.GetRun',
+        [runs[0].runID],
+      )
+      expect(detail.status).toBe('ERROR')
+      expect(detail.output).toContain(marker)
+
+      await page.getByTestId('coding-loop-result-copy').click()
+      await expect(page.getByTestId('coding-loop-result-copy')).toContainText('Copied')
+      await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()), { timeout: 10_000 })
+        .toBe(detail.output)
     })
   } finally {
     await tearDown(f)
