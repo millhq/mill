@@ -11,7 +11,7 @@ surface proves none fits. See `architecture.md` and `frontend.md`.
 ## The dispatch lock — adoption is decided before dispatch
 
 The orchestrator names the commodity/pattern and abstraction level in the brief.
-Unnamed adopt-or-build choices stop execution for a decision.
+An agent stops and reports an unnamed adopt-or-build choice.
 
 ## The maintenance lock — adoption wins when it removes owned machinery
 
