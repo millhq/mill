@@ -5,64 +5,70 @@ No `paths` frontmatter — unconditional.
 ## The law
 
 **Novelty lives in the SURFACE. Familiarity lives in every INTERACTION.**
-Typing, dragging, selecting, undo and menus use the converged pattern unless
-the surface itself proves none fits. See `architecture.md` and `frontend.md`.
+Typing, dragging, selecting, undo and menus use converged patterns unless the
+surface proves none fits. See `architecture.md` and `frontend.md`.
 
 ## The dispatch lock — adoption is decided before dispatch
 
-The orchestrator writes the commodity/pattern and abstraction level into the
-brief. An agent stops and reports an unnamed adopt-or-build choice.
+The orchestrator names the commodity/pattern and abstraction level in the brief.
+Unnamed adopt-or-build choices stop execution for a decision.
 
 ## The maintenance lock — adoption wins when it removes owned machinery
 
-Before Plan or builder dispatch, compare maintained solutions' full relevant
-capabilities and upstream evolution with Mill Today and every capability Mill
-would otherwise build. Adopt the highest applicable abstraction that owns the
-whole job and satisfies Mill's constraints; raw primitives belong only beneath
-its thin adapter. Record solution/version/API, Mill-specific adapter/domain
-remainder, and total ownership: compatibility, migrations, packaging, tests,
-releases and future gaps.
+Before Plan or dispatch, compare maintained solutions' full relevant capabilities
+and upstream evolution against Mill Today and otherwise-needed capabilities.
+Adopt the highest abstraction owning the whole job within Mill's constraints;
+raw primitives belong beneath its thin adapter. Record solution/version/API,
+domain/adapter remainder, compatibility, migrations, packaging, tests, releases
+and future gaps.
 
-This applies to product, testing and orchestration work. Configure the adopted
-framework's applicable fixtures, waits, assertions, retries and reporting before
-custom harness code; domain-specific tests and installed/OS proof remain.
+This covers product, testing and orchestration. Configure framework fixtures,
+waits, assertions, retries and reporting before custom harness code; retain
+domain tests and installed/OS proof.
 
-Custom machinery, including a parallel homemade lifecycle around a library,
-requires a specific unmet requirement demonstrated against current upstream
-APIs. Narrow parity, sunk cost, familiarity or smaller first patches do not
-qualify. “Not researched” never means “none exists”; unresolved adoption
-returns to research.
+Custom machinery, including parallel homemade lifecycle around a library, needs
+an unmet requirement demonstrated against current upstream APIs. Narrow parity,
+sunk cost, familiarity and smaller patches do not qualify. Unresearched fit
+returns to research; it never means nothing exists.
+
+## The priority rule — verified adoption goes first
+
+A maintained framework replacing custom machinery, fitting design/constraints
+and adding useful capability takes priority over extending that machinery.
+Record fit, gain, migration/deletion boundary, rollback and acceptance in the
+owning goal; promote BACKLOG priority. Standing owner authorization permits
+normal delivery without routine reapproval. Preserve explicit holds and required
+review, policy and verification gates. Unknown fit requires research.
 
 ## The method — a feature is a composition of two adopted contracts
 
-A feature composes the converged external API with Mill's surface API through
-an adapter. Invent neither side.
+Compose the converged external API with Mill's surface API through an adapter;
+invent neither side.
 
-1. **Research, never infer.** Record CLAUDE.md's **Precedent** → **Today** →
-   **Gap** before Plan.
-2. **Adopt and configure the whole API at its HIGHEST abstraction.**
-3. **Build only the adapter.** Re-implementing shipped behavior is a defect.
-4. **Adapter can't reach? Grow the SURFACE** by extending the kernel contract.
+1. Record **Precedent → Today → Gap** before Plan.
+2. Adopt/configure the whole API at its highest abstraction.
+3. Build only the adapter; reimplementing shipped behavior is a defect.
+4. If the adapter cannot reach, extend the surface/kernel contract.
 
 ## Pre-rule code migrates, never grandfathers
 
-When touched code hand-rolls what the adopted library ships, migrate it first
-with old tests unchanged. Outside the goal, file a same-day BACKLOG entry.
+Migrate touched custom equivalents first, with old tests unchanged. Outside the
+goal, file a same-day BACKLOG entry; qualifying replacements follow the priority rule.
 
 ## The intake gate — commodity-first
 
-Split requests into the business outcome and platform decision; ask why a
-commodity does not fit. Specialized authoring belongs in an extension. Content
-management, always-on work and agent reach belong in Mill's API.
+Separate business outcome from platform decision; explain why a commodity cannot
+fit. Specialized authoring belongs in an extension. Content management,
+always-on work and agent reach belong in Mill's API.
 
 ## The two-plane boundary
 
-An extension owns the human authoring plane. Mill's API owns guarded
-programmatic edits to the same file: one artifact, two doors, one guard.
+Extensions own human authoring; Mill's API guards programmatic edits to the same
+file: one artifact, two doors, one guard.
 
 ## The test
 
-- *Borrowed or invented? Does the surface demand invention?*
-- *Whole highest abstraction configured, or parallel custom lifecycle?*
-- *Which qualifying option leaves least ownership; what adapter/gap remains?*
-- *(Intake)* The commodity's job, or Mill's API's job?
+- Borrowed or invented; does the surface demand invention?
+- Whole highest abstraction configured, or parallel custom lifecycle?
+- Which qualifying option minimizes ownership; what remains?
+- Commodity's job, or Mill's API's job?
