@@ -93,16 +93,14 @@ this file is the record, a brief is a projection of it.
 
 - **Poll in place: background-run completion notifications are LOST.
   Never run a command with `run_in_background`; never end a turn waiting
-  on one — run it in the foreground (timeout up to 600000) and, if it
-  outlives one call, poll its output with a bounded `sleep 30` loop in
-  the NEXT foreground call, repeating in the same turn until done.**
+  on one — run it in the foreground (timeout up to 600000) and continue
+  its live native handle with bounded waits until done. A bounded
+  observation timeout does not terminate the command or its ownership.**
   (Five builders in one day still stopped to wait for a notification.)
 - A lefthook commit can outlive one foreground Bash call (the full
-  suite plus the gate-lock wait exceeds 600 s). Launch it detached
-  INSIDE a foreground call (`nohup git commit -F msg.txt > commit.log
-  2>&1 &`, never the tool's `run_in_background`), then poll
-  `commit.log`/`git log -1` in bounded `sleep 30` loops in the next
-  calls (macOS has no `setsid`).
+  suite plus the gate-lock wait exceeds 600 s). Continue the live native
+  command handle with bounded waits; never detach it with `nohup`, end
+  while it runs, or start a duplicate after an observation timeout.
 - Your worktree is your world: never write outside it; `cd` does not
   persist across Bash calls — use absolute paths (a stray file has
   landed in the main checkout twice this way).
@@ -180,12 +178,11 @@ this file is the record, a brief is a projection of it.
   exact line `Important findings open: 0`, or CI rejects the PR. Paste
   the review report into the PR body under `## Review` with that exact
   line, not just into the final chat report.
-- Obvious: after `gh pr create`, watch CI until it merges. Here: NEVER —
-  a builder arms `gh pr merge --squash --auto`, delivers its report and
-  STOPS. Subagents never receive background-task notifications (three
-  builders in one night ended turns "waiting for CI"; one burned 570k
-  tokens polling); the orchestrator watches merges, BEHIND states and
-  conflicts. Poll in place applies to the builder's OWN commands only.
+- Obvious: after `gh pr create`, hand the open PR to the orchestrator.
+  Here: the builder owns required checks, fixes, queue state and bounded
+  native waits through verified `MERGED`; armed/open is not delivered.
+  An observation timeout is not termination, but infinite or detached
+  watches remain forbidden.
 - Obvious: `until ! pgrep -f "<cmd>"; do sleep; done` to wait for a
   process. Here: the loop's own command line contains `<cmd>`, so pgrep
   matches itself and the loop never exits (seven stale loops in one

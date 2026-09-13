@@ -50,7 +50,11 @@ for name in sources:
         expected['sandbox_mode'] = 'read-only'
     assert profile == expected, f'{path}: native role contract drift'
 config = tomllib.loads(Path('.codex/config.toml').read_text())
-assert config == {'agents': {'max_concurrent_threads_per_session': 3}}, 'native configuration drift'
+assert config == {'agents': {
+    'max_concurrent_threads_per_session': 3,
+    'default_subagent_model': 'gpt-5.6-sol',
+    'default_subagent_reasoning_effort': 'high',
+}}, 'native configuration drift'
 PYTHON
 for rule in .claude/rules/*.md; do
   grep -Fq "$rule" AGENTS.md || fail "router missing $rule"

@@ -13,21 +13,29 @@ and [hooks contract](https://learn.chatgpt.com/docs/hooks).
 
 ## Roles and activation
 
+Primary orchestration sessions follow the [conductor startup
+contract](CONDUCTOR.md) after loading AGENTS and its required project context.
 Nine `.codex/agents/*.toml` profiles load their matching canonical role bodies.
 Explorer uses Luna/medium, reviewer Luna/high, architect Astra/high, and all
-other roles Sol/high. These are operational defaults, not equivalents of
-Claude model prices or quality. The orchestrator model remains unchanged.
+other roles Sol/high. Generic children fall back to Sol/high through the
+`agents.default_subagent_model` and `agents.default_subagent_reasoning_effort`
+settings. These are operational defaults, not equivalents of Claude model
+prices or quality. They do not change the primary session's model.
 Explorer, reviewer, research and architect request native read-only sandboxes;
 other roles inherit the parent sandbox so test caches and owned worktrees work.
 The configured child concurrency cap is three, subject to lower runtime limits.
-The current collaboration tool needs explicit role prompts and boundaries;
-it does not expose named profiles or per-agent tool allowlists. See AGENTS.
+When the active transport exposes `agent_type` or named roles, use them and
+their runtime model assignments. Otherwise pass the canonical role path, brief
+and boundaries explicitly. Neither mode implies a per-agent tool allowlist or
+an enforced sandbox; inspect the active runtime and report missing capability.
 
-Start a fresh Codex session after updating this configuration. Review/trust
+Start a fresh Codex session after updating this configuration; the running
+session does not reload these defaults. Review/trust
 the project configuration and hook definitions through the host's native
 review flow. This repository never writes trust or bypasses it. Configuration
 files alone do not prove activation. Confirm skill discovery, role loading and
-hook behavior in that session before relying on automatic enforcement.
+hook behavior, fallback model selection and concurrency in that session before
+relying on automatic enforcement.
 The missing CLI executable and denied Codex app control observed during this
 setup are this-session activation limitations, not permanent product limits.
 
@@ -72,9 +80,9 @@ command -v golangci-lint >/dev/null 2>&1 && golangci-lint cache clean >/dev/null
 
 ## Delivery ownership
 
-The Codex translation supersedes the older builder body's stop-at-auto-merge
-instruction: builders own bounded CI waits, fixes and repository merge-queue
-enqueue through verified `MERGED`. Armed/open is not delivered. Use
+The canonical builder body and Codex translation assign builders bounded CI
+waits, fixes and repository merge-queue enqueue through verified `MERGED`.
+Armed/open is not delivered. Use
 `gh pr merge --auto` and verify actual queue state; an already-armed PR may
 need native `enqueuePullRequest`. Never rebase, force-push or change branch
 protections. The orchestrator independently verifies the merged result and
