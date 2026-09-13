@@ -157,14 +157,14 @@ the choice.
 Product-level, always in effect. Coding conventions live in
 `.claude/rules/` instead.
 
-- **No Rust** anywhere in the toolchain or dependency tree.
+- **No end-user build toolchain requirement for the core app.** Ship ready-to-run
+  binaries; upstream implementation language, including Rust, is not a rejection criterion. Build/package dependencies on supported CI/developer machines.
 - **No AI API calls from Mill itself, no phone-home telemetry** — Mill
   mediates/guards actions other systems initiate, it is not an LLM
   client. Zero outbound calls not explicitly user-initiated via a
   user-configured connector.
 - **Single binary, no separate CLI/backend split** — Wails3 satisfies this.
-- **Install story is `git clone` + documented local build** — no
-  hosted-service dependency for the core loop.
+- **Install story is downloading a published binary.** Documented source builds remain a developer option; the core loop has no hosted-service dependency.
 - **CI/CD from day one** — every capability lands with its checks wired
   in the same change.
 - **SPEC.md tracks every capability from day one** — an entry in the
