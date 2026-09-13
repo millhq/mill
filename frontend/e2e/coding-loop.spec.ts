@@ -157,17 +157,17 @@ test('Coding loop: failed output stays visible and Copy result copies that exact
       await expect(output).toHaveAttribute('aria-label', 'Failed')
       await expect(output).toContainText(marker)
 
-      const workflows = await callBindingViaRPC<Array<{ id: string; label: string }>>(
+      const workflows = await callBindingViaRPC<Array<{ ID: string; Label: string }>>(
         page,
         'github.com/alicoding/mill/internal/services/compositionsvc.CompositionService.Workflows',
         [],
       )
-      const workflow = workflows.find((candidate) => candidate.label === 'Run from clipboard')
+      const workflow = workflows.find((candidate) => candidate.Label === 'Run from clipboard')
       if (!workflow) throw new Error('Run from clipboard seed is missing')
       const runs = await callBindingViaRPC<Array<{ runID: string }>>(
         page,
         'github.com/alicoding/mill/internal/services/executionsvc.ExecutionService.ListRunsForWorkflow',
-        [workflow.id],
+        [workflow.ID],
       )
       expect(runs).toHaveLength(1)
       const detail = await callBindingViaRPC<{ status: string; output: string }>(
