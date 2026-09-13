@@ -110,16 +110,17 @@ SubagentStop event, never on a harness turn-cap stop.
 
 - **Poll in place, never end a turn on a running command.** Run gates,
   builds and commits in the foreground with `timeout: 600000`. A
-  command that outlives one call: poll its output/log file in bounded
-  loops WITHIN the same turn, never `run_in_background` and never a
-  wait-only turn. No `until`/bare `sleep` loops that can spin forever --
-  bound every poll loop by iteration count or a real exit condition (a
-  PID check, a log line the command prints when done), never a pattern
-  that can match its own invocation.
-- A lefthook commit can outlive one foreground call: launch it detached
-  inside a foreground call (`nohup git commit -F msg.txt > commit.log
-  2>&1 &`, never the tool's own `run_in_background`), then poll
-  `commit.log`/`git log -1` in bounded loops in the next calls.
+  command that outlives one call continues through its live native
+  handle (`session_id` / `write_stdin`, or the runtime equivalent) with
+  bounded waits. A bounded observation timeout does not terminate the
+  command and does not justify abandoning its ownership. Never detach a
+  gate or commit with `nohup`/`run_in_background`, and never start a
+  duplicate because a wait returned no new output. No `until`/bare
+  `sleep` loops that can spin forever -- bound every wait by a real exit
+  condition and maximum observation interval.
+- A lefthook commit that outlives one foreground call continues through
+  the same live native handle with bounded waits; keep its result in the
+  current task before doing dependent work.
 - Removing a change that deletes a testid, event key, or exported symbol:
   grep `frontend/e2e/**` for every removed one before opening the PR --
   a silently orphaned selector fails a spec weeks later with no link
@@ -164,23 +165,28 @@ with its target path, for the orchestrator to apply.
   number,state` and report that output -- never assume creation
   succeeded from the command's own exit code alone.
 
-## Own the PR to merge -- arm auto-merge, then stop
+## Own the PR through verified merge
 
-You own the PR to merge; owning it means arming `gh pr merge --auto`
-(no `--squash` flag -- the repo default applies) and verifying with
-`gh pr view <n> --json autoMergeRequest`, never a live watch to
-completion. Poll loops are forbidden past this point: no `gh pr checks
---watch`, no `until`/polling loop, no background watch. Auto-merge
-completes the merge unattended once CI goes green; a failure past this
-point is the orchestrator's (or a dispatched `pr-shepherd`'s) to
-classify and reroute, never a live wait inside this agent's own turn.
-Report and END once auto-merge is armed -- do not wait for `state:
-MERGED` before reporting.
+You own the PR to merge. Arm `gh pr merge --auto` (no `--squash` flag;
+the repo default applies), verify actual queue state, and continue with
+bounded foreground native waits through `state: MERGED`. Armed/open is
+not delivered. If required checks fail, classify and fix failures within
+the brief, rerun the relevant gates, push, and continue ownership. If
+`gh pr view <n> --json mergeStateStatus` reads `BEHIND`, update the PR
+branch or merge `origin/main` into it and fix forward; never rebase,
+force-push, or change branch protections. An already-armed PR may need
+the host's native `enqueuePullRequest` operation.
+
+Poll loops are forbidden past this point when they are unbounded,
+detached, or not tied to the PR's required check or merge handle. Do not
+mistake an observation timeout for termination.
+Report only after `gh pr view <n> --json number,state` verifies `MERGED`,
+or report a concrete escalation after exhausting the bounded in-scope
+fixes.
 
 ## Report shape
 
 Follow the brief's own Report shape exactly if it states one. Absent
-that: PR number + confirmation that auto-merge is armed (`gh pr view
-<n> --json autoMergeRequest`); file:line per contract item; gate
-output; the Review section; any docs-repo drafts, each labeled with its
-target path.
+that: PR number + verified merged state (`gh pr view <n> --json
+number,state`); file:line per contract item; gate output; the Review
+section; any docs-repo drafts, each labeled with its target path.

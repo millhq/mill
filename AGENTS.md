@@ -31,6 +31,7 @@ applicable `SKILL.md` there (or through its canonical path) when using a skill.
 Native role profiles in `.codex/agents/` point to `.claude/agents/<role>.md`;
 read that body before executing a role. Preserve its scope, never-list, docs
 ownership/draft requirement, review format and owner PR verification duties.
+For a primary orchestration task, also read `.codex/CONDUCTOR.md`.
 
 ## Codex translations
 
@@ -41,11 +42,10 @@ examples, not the shared working discipline:
   They are operational assignments, not claims of Claude cost/quality equivalence.
   Leave the orchestrator model unchanged. State the actual model on dispatch;
   use a permitted runtime choice and disclose unavailable configured models.
-- The current `collaboration.spawn_agent` has no named-profile or tool-allowlist
-  argument. Supply the canonical role path, brief and explicit boundaries in
-  its prompt; use the native profile's model/effort when exposed and permitted.
-  Read-only behavior in this transport is instructed, not guaranteed sandbox
-  isolation; native read-only profiles enforce it only when the host loads them.
+- When `agent_type` or named roles are exposed, use them and their runtime model
+  assignments; otherwise pass the canonical role path, brief and boundaries
+  explicitly. Neither mode implies a tool allowlist or enforced sandbox;
+  inspect the active runtime and report unavailable capabilities.
 - A reviewer starts fresh with `fork_turns=none`; never same-context review.
   Create each builder's git worktree explicitly. At most three concurrent
   children; honor any lower runtime limit and CLAUDE's heavy-gate lock.
@@ -62,9 +62,8 @@ examples, not the shared working discipline:
 - Native UI work uses available, permitted computer-use tools. Report permission
   denials; never route a denied action through a different control channel.
 - Builders own bounded CI waits, fixes and merge-queue enqueue through verified
-  `MERGED`; this supersedes the older builder stop-at-auto-merge instruction.
-  Armed/open is not delivered. Verify actual queue state; never change branch
-  protections. The orchestrator independently verifies and owns docs/closeout.
+  `MERGED`; armed/open is not delivered. Verify actual queue state; never change
+  branch protections. The orchestrator independently verifies and owns docs/closeout.
 - Read `.codex/README.md` for native hook activation and lifecycle translations.
   At explicit task completion, run the canonical task-completion guard with the
   outcome subject and cwd. Perform canonical worktree cleanup only after removal
