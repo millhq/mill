@@ -52,4 +52,13 @@ describe('downloadBlob', () => {
     mocks.saveBinaryFile.mockRejectedValueOnce(new Error('save failed'))
     await expect(downloadBlob('export.bin', new Blob())).rejects.toThrow('save failed')
   })
+
+  it('returns quietly when the native save dialog is cancelled', async () => {
+    mocks.getBuildInfo.mockResolvedValue({ Server: false })
+    mocks.saveBinaryFile.mockResolvedValue('')
+
+    await expect(downloadBlob('export.bin', new Blob(['bytes']))).resolves.toBeUndefined()
+
+    expect(mocks.saveBinaryFile).toHaveBeenCalledOnce()
+  })
 })

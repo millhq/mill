@@ -2,71 +2,43 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button, Stack, Text } from '@primer/react'
 import { AuditService, SettingsService } from '../shared/bindings'
+import { downloadBlob } from '../shared/downloadBlob'
 import styles from '../shared/ListCard.module.css'
 
-// Settings → Contract: the two machine-readable exports for an agent
-// that can't reach Mill directly -- mill://contract (every data schema,
-// the step catalog, this app's version) and, alongside it rather than
-// merged into it (goal 0160), mill://skill (the practice doc: which
-// tool fits which job, how approvals behave). Split out of
-// SettingsView.tsx once that file crossed the 500-line convention
-// (CLAUDE.md), the same seam KeyboardShortcutsSection/UpdatesSection/
-// DataStewardshipSection already extract along.
 export default function ContractSection() {
   const { t } = useTranslation('views')
   const [contractExportError, setContractExportError] = useState('')
   const [skillExportError, setSkillExportError] = useState('')
   const [auditExportError, setAuditExportError] = useState('')
 
-  // Same fetch-JSON-then-download-a-blob shape as CompositionView's own
-  // exportWorkflow -- one file, no server round trip beyond the RPC
-  // itself.
-  const exportContract = () => {
+  const exportContract = async () => {
     setContractExportError('')
-    SettingsService.ExportContract()
-      .then((json) => {
-        const blob = new Blob([json], { type: 'application/json' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = 'mill-contract.json'
-        a.click()
-        URL.revokeObjectURL(url)
-      })
-      .catch(() => setContractExportError(t('settings.contract.exportError')))
+    try {
+      const json = await SettingsService.ExportContract()
+      await downloadBlob('mill-contract.json', new Blob([json], { type: 'application/json' }))
+    } catch {
+      setContractExportError(t('settings.contract.exportError'))
+    }
   }
 
-  const exportSkillDoc = () => {
+  const exportSkillDoc = async () => {
     setSkillExportError('')
-    SettingsService.ExportSkillDoc()
-      .then((markdown) => {
-        const blob = new Blob([markdown], { type: 'text/markdown' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = 'mill-skill.md'
-        a.click()
-        URL.revokeObjectURL(url)
-      })
-      .catch(() => setSkillExportError(t('settings.contract.exportSkillError')))
+    try {
+      const markdown = await SettingsService.ExportSkillDoc()
+      await downloadBlob('mill-skill.md', new Blob([markdown], { type: 'text/markdown' }))
+    } catch {
+      setSkillExportError(t('settings.contract.exportSkillError'))
+    }
   }
 
-  // The one export door over EVERY guarded surface's shared trail
-  // (goal 0351 Decision 5) -- kinds=[] means every kind, same
-  // fetch-then-download shape as the two exports above.
-  const exportAuditTrail = () => {
+  const exportAuditTrail = async () => {
     setAuditExportError('')
-    AuditService.ExportAuditTrail([])
-      .then((jsonLines) => {
-        const blob = new Blob([jsonLines], { type: 'application/json' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = 'mill-audit-trail.jsonl'
-        a.click()
-        URL.revokeObjectURL(url)
-      })
-      .catch(() => setAuditExportError(t('settings.contract.exportAuditError')))
+    try {
+      const jsonLines = await AuditService.ExportAuditTrail([])
+      await downloadBlob('mill-audit-trail.jsonl', new Blob([jsonLines], { type: 'application/json' }))
+    } catch {
+      setAuditExportError(t('settings.contract.exportAuditError'))
+    }
   }
 
   return (
