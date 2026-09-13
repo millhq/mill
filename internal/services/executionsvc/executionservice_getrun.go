@@ -124,6 +124,8 @@ func (e *ExecutionService) GetRun(runID string) (RunDetail, error) {
 
 	var view []RunStep
 	prevPayload, prevAttrs := initialPayload, initialAttrs
+	var failedOutput string
+	haveFailedOutput := false
 	for _, n := range order {
 		rs := RunStep{
 			NodeID: n.ID, NodeTypeID: n.NodeTypeID, NodeTypeLabel: typeLabels[n.NodeTypeID], Status: "pending",
@@ -137,9 +139,18 @@ func (e *ExecutionService) GetRun(runID string) (RunDetail, error) {
 				rs.Waits = append(rs.Waits, RunWait{Reason: ParkReasonVaultLocked, ParkedAt: s.CompletedAt})
 			}
 			rs.CompletedAt = s.CompletedAt
+			out, outputDecoded := decodeAny[composition.ExecContext](s.Output)
+			if outputDecoded {
+				rs.Output = out.Payload
+				rs.OutputAttributes = out.Attributes
+			}
 			if s.Error != nil {
 				rs.Status = "failed"
 				rs.Error = s.Error.Error()
+				if outputDecoded && !haveFailedOutput {
+					failedOutput = out.Payload
+					haveFailedOutput = true
+				}
 				// A code-execution step killed via CancelRun records a
 				// distinct status (docs/adr/0026: "cancelled != failed !=
 				// interrupted") -- matched by message, not error identity,
@@ -151,9 +162,7 @@ func (e *ExecutionService) GetRun(runID string) (RunDetail, error) {
 				}
 			} else {
 				rs.Status = "succeeded"
-				if out, ok := decodeAny[composition.ExecContext](s.Output); ok {
-					rs.Output = out.Payload
-					rs.OutputAttributes = out.Attributes
+				if outputDecoded {
 					// This step's OUTPUT becomes the next EXECUTED step's
 					// INPUT -- only advanced on a real success, so
 					// anything appended after it in "pending" still shows
@@ -178,6 +187,10 @@ func (e *ExecutionService) GetRun(runID string) (RunDetail, error) {
 			rs.Status = "awaiting-approval"
 		}
 		view = append(view, rs)
+	}
+
+	if summary.Status == "ERROR" && summary.Output == "" && haveFailedOutput {
+		summary.Output = failedOutput
 	}
 
 	return RunDetail{RunSummary: summary, Steps: view}, nil

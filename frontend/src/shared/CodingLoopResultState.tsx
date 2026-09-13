@@ -44,7 +44,7 @@ export function CodingLoopResultState({ detail, copyState, onCopy }: Props) {
       <OutputViewer
         value={detail.output}
         shape="text"
-        title={t('codingLoop.result.succeededTitle')}
+        title={succeeded ? t('codingLoop.result.succeededTitle') : t('codingLoop.result.failedTitle')}
         site="coding-loop-result"
         testId="coding-loop-result-output"
       />
