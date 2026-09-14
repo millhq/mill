@@ -48,7 +48,7 @@
     "genson-js": "^0.0.8",
     "i18next": "^26.4.2",
     "lodash": "^4.18.1",
-    "marked": "^16.4.2",
+    "marked": "^18.0.12",
     "mermaid": "^11.17.2",
     "modern-screenshot": "4.7.0",
     "papaparse": "^5.7.0",
