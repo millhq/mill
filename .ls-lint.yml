@@ -88,7 +88,7 @@ ls:
 
 ignore:
   # Public, inert code-recovery patches are kept outside the app and docs trees.
-  - archive
+  - archive/retirement-2026-09-19
   # userdocs/ + skills/ (goal 0125, ADR-0001 extension): user-facing
   # docs and agent skills ship in the PUBLIC repo -- docs must embed
   # into the binary and stay licensable with the code; skills are the
