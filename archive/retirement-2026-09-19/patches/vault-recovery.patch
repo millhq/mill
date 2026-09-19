@@ -1,0 +1,969 @@
+diff --git a/frontend/bindings/github.com/alicoding/mill/internal/services/secretsvc/secretservice.ts b/frontend/bindings/github.com/alicoding/mill/internal/services/secretsvc/secretservice.ts
+index e8027eee23d8f18881ec76233ffb7989515193d2..38116d540b1a666a9a7e19856818e555767f9f51 100644
+--- a/frontend/bindings/github.com/alicoding/mill/internal/services/secretsvc/secretservice.ts
++++ b/frontend/bindings/github.com/alicoding/mill/internal/services/secretsvc/secretservice.ts
+@@ -208,6 +208,23 @@ export function ResetVault(): $CancellablePromise<void> {
+     return $Call.ByID(2341448377);
+ }
+ 
++/**
++ * RestoreVaultFromLatestBackup is the key-mismatch state's own door out
++ * (goal 0359) when the current vault file is unreadable but a local
++ * backup still carries one: archives the current file exactly as
++ * ResetVault does (its own timestamped .bak.kdbx sibling, nothing
++ * deleted), copies the newest backup's vault copy into the now-empty
++ * target, and consumes that one backup's own copy so a repeated attempt
++ * (this one didn't help either) moves on to the next-older backup
++ * rather than restoring the identical file again. Never unlocks on its
++ * own -- the restored file's identity picks its own key slot, and
++ * whether THAT key is still in the keychain is exactly what the next
++ * Unlock click answers.
++ */
++export function RestoreVaultFromLatestBackup(): $CancellablePromise<void> {
++    return $Call.ByID(3591040275);
++}
++
+ /**
+  * RevealSecret returns one entry in full, password included -- a
+  * distinct, explicit call from ListSecrets (never incidental to
+diff --git a/frontend/e2e/secrets.spec.ts b/frontend/e2e/secrets.spec.ts
+index f0cf06a70fee0380b96dc1704317ef0d05211970..e6d94d15b7278a581c285ea4ffaca044be649f16 100644
+--- a/frontend/e2e/secrets.spec.ts
++++ b/frontend/e2e/secrets.spec.ts
+@@ -5,7 +5,7 @@ import path from 'node:path'
+ import { SECRETS_MCP_BASE_PORT, SECRETS_SERVER_BASE_PORT, spawnMillServer, type SpawnedServer } from './fixtures/server'
+ import { withClipboardLock } from './fixtures/clipboardLock'
+ import { paletteDialog } from './fixtures/palette'
+-import { corruptVaultKeyForTests } from './vaultKeyDebugKnob'
++import { callBoundMethod, corruptVaultKeyForTests } from './vaultKeyDebugKnob'
+ 
+ // The secret manager's human-facing surface (goal 0185 S2): create a
+ // vault, store a password, reveal/hide it, copy it to the real OS
+@@ -305,7 +305,7 @@ test('secret manager: a vault whose stored key no longer opens it names the caus
+     // No backup has run yet -- the caption stays off rather than
+     // claiming a recovery copy that doesn't exist.
+     await page.getByTestId('secrets-lock').click()
+-    await corruptVaultKeyForTests(page, server.baseURL)
++    await corruptVaultKeyForTests(page)
+     await page.getByTestId('secrets-unlock-cta').click()
+     await expect(page.getByText("This vault's key isn't on this device")).toBeVisible()
+     await expect(page.getByText(
+@@ -315,8 +315,76 @@ test('secret manager: a vault whose stored key no longer opens it names the caus
+     // alongside it.
+     await expect(page.getByTestId('secrets-unlock-error')).toHaveCount(0)
+     await expect(page.getByTestId('secrets-vault-backup-caption')).toHaveCount(0)
+-    // The one door out is still there, unchanged.
++    // The one door out is still there, unchanged; with no backup taken
++    // yet, "Restore the last backup" has nothing to offer.
+     await expect(page.getByTestId('secrets-reset-cta')).toBeVisible()
++    await expect(page.getByTestId('secrets-restore-backup-cta')).toHaveCount(0)
++  } finally {
++    await browser.close()
++    if (server) await server.stop()
++    rmSync(dir, { recursive: true, force: true })
++  }
++})
++
++// Goal 0359: the key-mismatch state's own recovery door. A backup taken
++// while the FIRST vault's key still works keeps that key usable even
++// after the CURRENT vault's own key breaks (a second ResetVault stands
++// in for "this device later got a different vault at the same path" --
++// the RPC escape hatch, since reaching Reset through the UI itself
++// needs an unlock failure already on screen, which isn't yet true here
++// and isn't what this test is proving). Everything from the reload
++// onward drives the real rendered UI.
++// eslint-disable-next-line no-empty-pattern -- needs `testInfo`, not any fixture.
++test('secret manager: restoring the last backup recovers a vault whose current key broke', async ({}, testInfo) => {
++  const idx = testInfo.parallelIndex
++  const dir = mkdtempSync(path.join(tmpdir(), `mill-e2e-secrets-restore-${idx}-`))
++  const settingsPath = path.join(dir, 'settings.json')
++  const executionDbPath = path.join(dir, 'execution.db')
++  const backupDir = path.join(dir, 'backups')
++  const port = SECRETS_SERVER_BASE_PORT + idx
++  const mcpPort = SECRETS_MCP_BASE_PORT + idx
++
++  let server: SpawnedServer | undefined
++  const browser = await chromium.launch()
++  try {
++    server = await spawnMillServer({ port, mcpPort, settingsPath, executionDbPath, backupDir })
++    const page = await browser.newPage()
++    await page.goto(`${server.baseURL}/`)
++    await page.getByRole('link', { name: 'Secrets' }).click()
++    await page.getByRole('button', { name: 'Got it' }).click()
++    await page.getByTestId('secrets-setup-cta').click()
++    await expect(page.getByTestId('secrets-view').getByText('Example Login', { exact: true })).toBeVisible()
++
++    // A real backup, taken while this (first) vault's own key is still
++    // good -- BackupService.BackupNow, the same RPC "Back up now" in
++    // Settings drives.
++    await callBoundMethod(page, 'github.com/alicoding/mill/internal/services/backupsvc.BackupService.BackupNow', [0])
++
++    // A second vault now lives at the same path, its own identity and
++    // key -- the first vault's own key is left exactly where it was
++    // (goal 0330), which is the whole point: it's what the restored
++    // backup will still be able to use. corruptVaultKeyForTests always
++    // targets whichever identity is live right now, so THIS one breaks.
++    // ResetVault leaves the vault UNLOCKED, so it's locked explicitly
++    // before reload -- otherwise the browse view, not the locked one,
++    // is what's still showing server-side.
++    await callBoundMethod(page, 'github.com/alicoding/mill/internal/services/secretsvc.SecretService.ResetVault', [])
++    await corruptVaultKeyForTests(page)
++    await callBoundMethod(page, 'github.com/alicoding/mill/internal/services/secretsvc.SecretService.LockVault', [])
++
++    await page.reload()
++    await page.getByRole('link', { name: 'Secrets' }).click()
++    await page.getByTestId('secrets-unlock-cta').click()
++    await expect(page.getByText("This vault's key isn't on this device")).toBeVisible()
++    await expect(page.getByTestId('secrets-vault-backup-caption')).toBeVisible()
++
++    await page.getByTestId('secrets-restore-backup-cta').click()
++
++    // The restored file is the FIRST vault -- its own key, never
++    // touched by the corruption above, is still in this device's
++    // keyring, so Unlock now succeeds and its seeded example is back.
++    await page.getByTestId('secrets-unlock-cta').click()
++    await expect(page.getByTestId('secrets-view').getByText('Example Login', { exact: true })).toBeVisible()
+   } finally {
+     await browser.close()
+     if (server) await server.stop()
+diff --git a/frontend/e2e/vaultKeyDebugKnob.ts b/frontend/e2e/vaultKeyDebugKnob.ts
+index 6e256b2f233d8e5006cb8bcce3822eab1d6b23c9..0d9ab30a5b7b0d8fa74938852ab729023b4822a7 100644
+--- a/frontend/e2e/vaultKeyDebugKnob.ts
++++ b/frontend/e2e/vaultKeyDebugKnob.ts
+@@ -1,42 +1,46 @@
+ import type { Page } from '@playwright/test'
+ 
+-// corruptVaultKeyForTests drives SecretService.DebugCorruptVaultKeyForTests
+-// (an e2e-only knob, internal/services/secretsvc/secretservice_debug.go)
+-// directly over Wails3's own runtime call wire protocol -- same shape
+-// and same reasoning as mcpTestClient.ts's backdatePendingMCPWrite:
+-// page.evaluate can't `import` a production-bundled chunk by a stable
+-// path, and the generated bindings' own numeric method IDs (Call.ByID)
+-// are regenerated per `wails3 generate bindings` run, too fragile to
+-// hardcode in a test, so this uses the stable METHOD NAME form
+-// (Call.ByName, "package.Struct.Method") instead.
+-//
+-// This knob exists because a genuine key-mismatch (a stored key that no
+-// longer opens its vault file) otherwise needs a second physical device
+-// holding the real key -- there's no other way to reproduce it against
+-// one server-mode process. It overwrites the vault's own stored key
+-// with a freshly minted, unrelated one, so the next unlock attempt
+-// reports ErrKeyMismatch. Server-side gated to MILL_TEST_KEYRING=memory
+-// (the same in-memory-keyring switch spawnMillServer already sets for
+-// every worker), so this can never reach a real device's keychain.
+-//
+-// baseURL is taken explicitly (rather than relying on page.request's
+-// own base) because this spec's dedicated-server tests build their
+-// page via a bare browser.newPage(), not the shared-pool `test`
+-// fixture that overrides the context's baseURL per worker.
+-export async function corruptVaultKeyForTests(page: Page, baseURL: string): Promise<void> {
+-  const res = await page.request.post(`${baseURL}/wails/runtime`, {
+-    headers: { 'x-wails-client-id': 'e2e-test-knob', 'Content-Type': 'application/json' },
+-    data: {
+-      object: 0, // objectNames.Call
++// callBoundMethod drives any Wails-bound RPC directly over Wails3's own
++// runtime call wire protocol, by its stable Go method NAME (never a
++// numeric hash, which Wails derives from the method signature and
++// would drift on an unrelated refactor) -- same shape
++// atlasNativeDropEscapeHatch.ts's createBoardObjectViaRPC and
++// clipboardHistorySeed.ts's seedClipboardHistoryEntry already
++// establish: page.evaluate + fetch(window.location.origin + ...), not
++// page.request.post, since a dedicated-server spec's page (built via a
++// bare browser.newPage(), not the shared-pool `test` fixture) has no
++// baseURL configured for page.request to resolve a relative path
++// against, while the PAGE ITSELF always knows its own origin.
++export async function callBoundMethod(page: Page, methodName: string, args: unknown[]): Promise<void> {
++  const result = await page.evaluate(async ({ methodName, args }) => {
++    const callID = `${Date.now()}-${Math.random().toString(36).slice(2)}`
++    const body = {
++      object: 0, // @wailsio/runtime's objectNames.Call
+       method: 0, // CallBinding
+-      args: {
+-        'call-id': `e2e-corrupt-vault-key-${Date.now()}`,
+-        methodName: 'github.com/alicoding/mill/internal/services/secretsvc.SecretService.DebugCorruptVaultKeyForTests',
+-        args: [],
+-      },
+-    },
+-  })
+-  if (!res.ok()) {
+-    throw new Error(`corruptVaultKeyForTests failed: ${res.status()} ${await res.text()}`)
++      args: { 'call-id': callID, methodName, args },
++    }
++    const res = await fetch(window.location.origin + '/wails/runtime', {
++      method: 'POST',
++      headers: { 'x-wails-client-id': 'e2e-vault-key-knob', 'Content-Type': 'application/json' },
++      body: JSON.stringify(body),
++    })
++    return { ok: res.ok, status: res.status, text: await res.text() }
++  }, { methodName, args })
++  if (!result.ok) {
++    throw new Error(`callBoundMethod(${methodName}) failed: ${result.status} ${result.text}`)
+   }
+ }
++
++// corruptVaultKeyForTests drives SecretService.DebugCorruptVaultKeyForTests
++// (an e2e-only knob, internal/services/secretsvc/secretservice_debug.go):
++// overwrites the CURRENT vault's stored key with a freshly minted,
++// unrelated one, so the next unlock attempt reports ErrKeyMismatch --
++// the only way to reproduce a genuine key mismatch (a stored key that
++// no longer opens its file) against one server-mode process, without a
++// second physical device holding the real key. Server-side gated to
++// MILL_TEST_KEYRING=memory (the same in-memory-keyring switch
++// spawnMillServer already sets for every worker), so this can never
++// reach a real device's keychain.
++export async function corruptVaultKeyForTests(page: Page): Promise<void> {
++  await callBoundMethod(page, 'github.com/alicoding/mill/internal/services/secretsvc.SecretService.DebugCorruptVaultKeyForTests', [])
++}
+diff --git a/frontend/src/locales/en/common.json b/frontend/src/locales/en/common.json
+index 73d9c01e376260ec8d2ec290f3a77284ca8d6010..bd0b61a5290c86ff9f6300aeaa5e2d66ee2e852e 100644
+--- a/frontend/src/locales/en/common.json
++++ b/frontend/src/locales/en/common.json
+@@ -323,7 +323,8 @@
+     "secrets": {
+       "lockVault": "Lock vault",
+       "unlockVault": "Unlock vault",
+-      "resetVault": "Start a new vault"
++      "resetVault": "Start a new vault",
++      "restoreVaultFromBackup": "Restore the last backup"
+     },
+     "settings": {
+       "open": "Open Settings",
+diff --git a/frontend/src/locales/en/secrets.json b/frontend/src/locales/en/secrets.json
+index 0637a7cf9fb9604a2c5be3d2c5c7e0aa1518f8e1..6e5427150847eddf41c92091ea7ee36b870fcee3 100644
+--- a/frontend/src/locales/en/secrets.json
++++ b/frontend/src/locales/en/secrets.json
+@@ -17,7 +17,8 @@
+     "cta": "Unlock",
+     "keyMismatchHeading": "This vault's key isn't on this device",
+     "keyMismatchBody": "The vault file was made with a key this device no longer has. Start a new vault to keep working; the old file stays beside it as a backup.",
+-    "lastBackup": "Last backup: {{time}}"
++    "lastBackup": "Last backup: {{time}}",
++    "restoreBackupCta": "Restore the last backup"
+   },
+   "touchId": {
+     "toggleLabel": "Require Touch ID to unlock",
+diff --git a/frontend/src/shared/commandsDeclaration.json b/frontend/src/shared/commandsDeclaration.json
+index 117b2236c1e5c526a383b1d0edaa78b1e08ba14e..c7383416117e63ead6312984ba858f0cea740f93 100644
+--- a/frontend/src/shared/commandsDeclaration.json
++++ b/frontend/src/shared/commandsDeclaration.json
+@@ -1077,6 +1077,14 @@
+     "enabled": true,
+     "needs": null
+   },
++  {
++    "id": "secrets.restoreVaultFromBackup",
++    "label": "Restore the last backup",
++    "binding": null,
++    "surface": null,
++    "enabled": true,
++    "needs": null
++  },
+   {
+     "id": "secrets.unlockVault",
+     "label": "Unlock vault",
+diff --git a/frontend/src/shared/secretsCommands.test.ts b/frontend/src/shared/secretsCommands.test.ts
+index 4dc97cf2bf3127087391961c94b41580eb620b64..fe9313503604952c53b8d133b906118931871176 100644
+--- a/frontend/src/shared/secretsCommands.test.ts
++++ b/frontend/src/shared/secretsCommands.test.ts
+@@ -60,3 +60,44 @@ describe('secrets.resetVault enablement', () => {
+     expect(findCommand('secrets.resetVault')?.paletteHidden).toBe(true)
+   })
+ })
++
++describe('secrets.restoreVaultFromBackup enablement', () => {
++  beforeEach(() => {
++    useVaultStatusStore.getState().setVaultError(null)
++    useVaultStatusStore.getState().setVaultBackupTime(null)
++  })
++
++  const enabled = () => findCommand('secrets.restoreVaultFromBackup')?.enabled?.() ?? false
++
++  it('is offered only for a key-mismatch lock with a backup that carries a vault', () => {
++    useVaultStatusStore.getState().setVaultStatus({ Exists: true, Unlocked: false, RequireAuth: false, AuthAvailable: false })
++    useVaultStatusStore.getState().setVaultError({ code: 'key-mismatch', message: "The key on this device doesn't open this vault file." })
++    useVaultStatusStore.getState().setVaultBackupTime({ time: '2026-09-04T10:00:00Z', present: true })
++    expect(enabled()).toBe(true)
++  })
++
++  it('is not offered when no backup carries a vault', () => {
++    useVaultStatusStore.getState().setVaultStatus({ Exists: true, Unlocked: false, RequireAuth: false, AuthAvailable: false })
++    useVaultStatusStore.getState().setVaultError({ code: 'key-mismatch', message: "The key on this device doesn't open this vault file." })
++    useVaultStatusStore.getState().setVaultBackupTime({ time: '', present: false })
++    expect(enabled()).toBe(false)
++  })
++
++  it('is not offered for a no-vault-key lock, even with a backup available -- that door is a fresh empty vault, not a swap', () => {
++    useVaultStatusStore.getState().setVaultStatus({ Exists: true, Unlocked: false, RequireAuth: false, AuthAvailable: false })
++    useVaultStatusStore.getState().setVaultError({ code: 'no-vault-key', message: "There's no key for this vault on this device." })
++    useVaultStatusStore.getState().setVaultBackupTime({ time: '2026-09-04T10:00:00Z', present: true })
++    expect(enabled()).toBe(false)
++  })
++
++  it('is never offered once the vault is open', () => {
++    useVaultStatusStore.getState().setVaultStatus({ Exists: true, Unlocked: true, RequireAuth: false, AuthAvailable: false })
++    useVaultStatusStore.getState().setVaultError({ code: 'key-mismatch', message: "The key on this device doesn't open this vault file." })
++    useVaultStatusStore.getState().setVaultBackupTime({ time: '2026-09-04T10:00:00Z', present: true })
++    expect(enabled()).toBe(false)
++  })
++
++  it('is offered in the palette', () => {
++    expect(findCommand('secrets.restoreVaultFromBackup')?.paletteHidden).toBeFalsy()
++  })
++})
+diff --git a/frontend/src/shared/secretsCommands.ts b/frontend/src/shared/secretsCommands.ts
+index 8f2909b4d27e383f9f83997b520ae28f236440b0..4607bb75cd640f3453a4f7deef92c1fb556713c3 100644
+--- a/frontend/src/shared/secretsCommands.ts
++++ b/frontend/src/shared/secretsCommands.ts
+@@ -1,6 +1,6 @@
+ import type { Command } from './commands'
+ import { SecretService } from './bindings'
+-import { refreshVaultStatus, useVaultStatusStore } from './vaultStatusStore'
++import { refreshVaultBackupTime, refreshVaultStatus, useVaultStatusStore } from './vaultStatusStore'
+ import type { UserError } from './userError'
+ import { userErrorFrom } from './userError'
+ 
+@@ -64,6 +64,25 @@ export const SECRETS_COMMANDS: Command[] = [
+     paletteHidden: true,
+     run: () => { record(SecretService.ResetVault()) },
+   },
++  {
++    id: 'secrets.restoreVaultFromBackup',
++    label: 'commands.secrets.restoreVaultFromBackup',
++    defaultBinding: null,
++    // Only offered where the key-mismatch state itself shows: a stored
++    // key that doesn't fit the current file, AND a local backup that
++    // still carries one to try instead.
++    enabled: () => {
++      const { vaultStatus, vaultError, vaultBackupTime } = useVaultStatusStore.getState()
++      if (vaultStatus === null || !vaultStatus.Exists || vaultStatus.Unlocked) return false
++      return vaultErrorKind(vaultError) === 'keyMismatch' && vaultBackupTime?.present === true
++    },
++    run: () => {
++      useVaultStatusStore.getState().setVaultError(null)
++      SecretService.RestoreVaultFromLatestBackup()
++        .then(() => Promise.all([refreshVaultStatus(), refreshVaultBackupTime()]))
++        .catch((err) => { useVaultStatusStore.getState().setVaultError(userErrorFrom(err)) })
++    },
++  },
+ ]
+ 
+ // vaultErrorKind classifies a lock/unlock failure by the stable code
+diff --git a/frontend/src/shared/vaultStatusStore.ts b/frontend/src/shared/vaultStatusStore.ts
+index 50a069845e453fb4bcbec458a84a43129fbb3630..75a53b96e0526053c8bc14d83a8d2005bf209145 100644
+--- a/frontend/src/shared/vaultStatusStore.ts
++++ b/frontend/src/shared/vaultStatusStore.ts
+@@ -1,6 +1,6 @@
+ import { create } from 'zustand'
+-import { SecretService } from './bindings'
+-import type { VaultStatus } from './bindings'
++import { BackupService, SecretService } from './bindings'
++import type { VaultBackupTime, VaultStatus } from './bindings'
+ import { background } from './background'
+ import type { UserError } from './userError'
+ 
+@@ -24,15 +24,26 @@ import type { UserError } from './userError'
+ interface VaultStatusState {
+   vaultStatus: VaultStatus | null
+   vaultError: UserError | null
++  // The key-mismatch state's own "Last backup" fact (goal 0359): held
++  // here, not view-local state, so secrets.restoreVaultFromBackup's own
++  // enabled() predicate reads the identical truth synchronously the
++  // palette/keyboard need, the same reason vaultStatus/vaultError
++  // already live here rather than in SecretsView.tsx. null means "not
++  // fetched for the current locked state yet"; Present=false once
++  // fetched means no backup carries a vault.
++  vaultBackupTime: VaultBackupTime | null
+   setVaultStatus: (vaultStatus: VaultStatus) => void
+   setVaultError: (vaultError: UserError | null) => void
++  setVaultBackupTime: (vaultBackupTime: VaultBackupTime | null) => void
+ }
+ 
+ export const useVaultStatusStore = create<VaultStatusState>()((set) => ({
+   vaultStatus: null,
+   vaultError: null,
++  vaultBackupTime: null,
+   setVaultStatus: (vaultStatus) => set({ vaultStatus }),
+   setVaultError: (vaultError) => set({ vaultError }),
++  setVaultBackupTime: (vaultBackupTime) => set({ vaultBackupTime }),
+ }))
+ 
+ // Mirrors store.ts's refreshWorkflows/refreshRequests shape: the one
+@@ -43,3 +54,13 @@ export function refreshVaultStatus(): Promise<void> {
+   return background(SecretService.VaultStatus()
+     .then((status) => useVaultStatusStore.getState().setVaultStatus(status)), 'vaultStatus.vaultStatus')
+ }
++
++// refreshVaultBackupTime re-reads which backup (if any) currently
++// carries a vault copy -- called whenever the locked view's own
++// key-mismatch state becomes current, and after a restore attempt
++// (goal 0359: a consumed backup drops off, so the caption/enablement
++// must reflect the next-older one, or none left).
++export function refreshVaultBackupTime(): Promise<void> {
++  return background(BackupService.LatestVaultBackupTime()
++    .then((t) => useVaultStatusStore.getState().setVaultBackupTime(t)), 'vaultStatus.vaultBackupTime')
++}
+diff --git a/frontend/src/views/SecretsView.tsx b/frontend/src/views/SecretsView.tsx
+index 55182b6ba10cf2b5d75569614363e16dea83a750..e59515685036173400df3b5dbbea1e2223b7a63d 100644
+--- a/frontend/src/views/SecretsView.tsx
++++ b/frontend/src/views/SecretsView.tsx
+@@ -4,11 +4,11 @@ import { Events } from '@wailsio/runtime'
+ import { Blankslate } from '@primer/react/experimental'
+ import { Button, Checkbox, FormControl, Heading, IconButton, Label, SegmentedControl, Stack, Text } from '@primer/react'
+ import { DownloadIcon, HistoryIcon, KeyIcon, LockIcon, PlusIcon } from '@primer/octicons-react'
+-import { BackupService, SecretService } from '../shared/bindings'
++import { SecretService } from '../shared/bindings'
+ import { Kind } from '../../bindings/github.com/alicoding/mill/internal/domain/secret/models'
+ import type { SecretSummary } from '../shared/bindings'
+ import { findCommand, runCommand } from '../shared/commands'
+-import { refreshVaultStatus, useVaultStatusStore } from '../shared/vaultStatusStore'
++import { refreshVaultBackupTime, refreshVaultStatus, useVaultStatusStore } from '../shared/vaultStatusStore'
+ import { vaultErrorKind } from '../shared/secretsCommands'
+ import { messageOf } from '../shared/userError'
+ import { ConfirmDialog } from '../shared/ConfirmDialog'
+@@ -65,10 +65,10 @@ export default function SecretsView({ initialTab }: { initialTab?: string } = {}
+   const [accessHistoryID, setAccessHistoryID] = useState<string | null>(null)
+   const [showAccessHistory, setShowAccessHistory] = useState(false)
+   const [confirmReset, setConfirmReset] = useState(false)
+-  // The key-mismatch state's own "Last backup" caption (goal 0359):
+-  // fetched only while that state is showing, since it's the one state
+-  // that names a recovery copy's age.
+-  const [vaultBackupTime, setVaultBackupTime] = useState<Date | null>(null)
++  // The key-mismatch state's own "Last backup" fact (goal 0359) lives
++  // in the shared vault store, not local state: secrets.restoreVaultFromBackup's
++  // own enabled() predicate needs to read it synchronously too.
++  const vaultBackupTime = useVaultStatusStore((s) => s.vaultBackupTime)
+ 
+   const sectionSwitch = (
+     <SegmentedControl aria-label={t('sections.ariaLabel')} className={styles.sections} data-testid="secrets-sections">
+@@ -162,18 +162,15 @@ export default function SecretsView({ initialTab }: { initialTab?: string } = {}
+     if (detailID && list !== null && !list.some((s) => s.ID === detailID)) setDetailID(null)
+   }, [list, detailID])
+ 
+-  // The key-mismatch caption (goal 0359): only fetched while that exact
+-  // state is showing, cleared otherwise.
++  // The key-mismatch caption + secrets.restoreVaultFromBackup's own
++  // enablement (goal 0359): only fetched while that exact state is
++  // showing, cleared otherwise.
+   useEffect(() => {
+     if (!status || status.Unlocked || vaultErrorKind(vaultError) !== 'keyMismatch') {
+-      setVaultBackupTime(null)
++      useVaultStatusStore.getState().setVaultBackupTime(null)
+       return
+     }
+-    let cancelled = false
+-    BackupService.LatestVaultBackupTime()
+-      .then((r) => { if (!cancelled) setVaultBackupTime(r.present ? new Date(r.time) : null) })
+-      .catch(() => { if (!cancelled) setVaultBackupTime(null) })
+-    return () => { cancelled = true }
++    void refreshVaultBackupTime()
+   }, [status, vaultError])
+ 
+   const remove = (id: string) => {
+@@ -244,6 +241,7 @@ export default function SecretsView({ initialTab }: { initialTab?: string } = {}
+       none: '',
+     }[kind]
+     const resetCommand = findCommand('secrets.resetVault')
++    const restoreCommand = findCommand('secrets.restoreVaultFromBackup')
+ 
+     return (
+       <PageContainer variant="wide" data-testid="secrets-view">
+@@ -268,11 +266,16 @@ export default function SecretsView({ initialTab }: { initialTab?: string } = {}
+                 {t('reset.cta')}
+               </Button>
+             )}
++            {restoreCommand?.enabled?.() && (
++              <Button onClick={() => void runCommand('secrets.restoreVaultFromBackup')} data-testid="secrets-restore-backup-cta">
++                {t('locked.restoreBackupCta')}
++              </Button>
++            )}
+           </Stack>
+           {lockedMessage && <Text as="p" size="small" className={styles.error} data-testid="secrets-unlock-error">{lockedMessage}</Text>}
+-          {isKeyMismatch && vaultBackupTime && (
++          {isKeyMismatch && vaultBackupTime?.present && (
+             <Text as="p" size="small" className={styles.subtitle} data-testid="secrets-vault-backup-caption">
+-              {t('locked.lastBackup', { time: vaultBackupTime.toLocaleString() })}
++              {t('locked.lastBackup', { time: new Date(vaultBackupTime.time).toLocaleString() })}
+             </Text>
+           )}
+         </Blankslate>
+diff --git a/internal/adapters/backup/backup.go b/internal/adapters/backup/backup.go
+index 4b4d124f5a9201ae4778fd5de8279c6b0c114740..ac531d29d3e60cc85ca6924e7beeae4d6edbd882 100644
+--- a/internal/adapters/backup/backup.go
++++ b/internal/adapters/backup/backup.go
+@@ -299,23 +299,51 @@ func Latest(dir string) (time.Time, error) {
+ // subdirectory carries a copy of the vault file, or the zero time if
+ // none does -- distinct from Latest, which answers about ANY backup
+ // regardless of what it carries: a vault set up after the oldest kept
+-// backups already rotated off leaves those without one. Walks newest
++// backups already rotated off leaves those without one.
++func LatestWithVault(dir string) (time.Time, error) {
++	_, t, err := LatestVaultBackupDir(dir)
++	return t, err
++}
++
++// LatestVaultBackupDir returns the newest backup's own directory path
++// and time whose subdirectory carries a copy of the vault file, or ""
++// and the zero time if none does -- the actual directory RestoreVault's
++// own backupDir argument expects, once a caller already knows one
++// exists (goal 0359's own recovery door reads this directly rather than
++// re-deriving a path from LatestWithVault's time alone). Walks newest
+ // to oldest and stops at the first hit, so this costs one stat per
+ // backup back to the answer, never a full directory scan.
+-func LatestWithVault(dir string) (time.Time, error) {
++func LatestVaultBackupDir(dir string) (string, time.Time, error) {
+ 	names, err := backupDirNames(dir)
+ 	if err != nil {
+-		return time.Time{}, err
++		return "", time.Time{}, err
+ 	}
+ 	for i := len(names) - 1; i >= 0; i-- {
+-		if _, err := os.Stat(filepath.Join(dir, names[i], vaultBackupName)); err != nil {
++		backupDir := filepath.Join(dir, names[i])
++		if _, err := os.Stat(filepath.Join(backupDir, vaultBackupName)); err != nil {
+ 			continue
+ 		}
+ 		t, err := time.ParseInLocation(TimestampLayout, names[i], time.Local)
+ 		if err != nil {
+-			return time.Time{}, fmt.Errorf("backup: parse backup name %q: %w", names[i], err)
++			return "", time.Time{}, fmt.Errorf("backup: parse backup name %q: %w", names[i], err)
+ 		}
+-		return t, nil
++		return backupDir, t, nil
+ 	}
+-	return time.Time{}, nil
++	return "", time.Time{}, nil
++}
++
++// ConsumeVaultBackup removes ONLY the vault copy from backupDir (one
++// specific backup's own subdirectory, as returned by
++// LatestVaultBackupDir) -- everything else that backup carries
++// (execution.db/settings.json) is untouched. Called after a successful
++// RestoreVault from this same directory, so a repeated restore-from-
++// backup attempt (the key still doesn't fit) moves on to the next-older
++// backup that still carries its own vault copy, rather than restoring
++// the exact same already-tried file again. A backup with no vault copy
++// to begin with is not an error -- there is nothing to consume.
++func ConsumeVaultBackup(backupDir string) error {
++	if err := os.Remove(filepath.Join(backupDir, vaultBackupName)); err != nil && !os.IsNotExist(err) {
++		return fmt.Errorf("backup: consume vault copy: %w", err)
++	}
++	return nil
+ }
+diff --git a/internal/adapters/backup/backup_test.go b/internal/adapters/backup/backup_test.go
+index eaa6c53c1b1d91042d25fca418b94c09f2958386..feb3aaed36b3d080f0a410007911575221aa2391 100644
+--- a/internal/adapters/backup/backup_test.go
++++ b/internal/adapters/backup/backup_test.go
+@@ -400,3 +400,78 @@ func TestLatestWithVault_NoBackupHasOne(t *testing.T) {
+ 		t.Errorf("LatestWithVault() = %v, want zero time when no backup carries one", got)
+ 	}
+ }
++
++func TestConsumeVaultBackup_RemovesOnlyTheVaultCopy(t *testing.T) {
++	dbPath := newTestDB(t)
++	backupDir := t.TempDir()
++	vaultPath := filepath.Join(t.TempDir(), "secrets.kdbx")
++	if err := os.WriteFile(vaultPath, []byte("fake-kdbx-bytes"), 0o600); err != nil {
++		t.Fatalf("write vault fixture: %v", err)
++	}
++	result, err := Snapshot(dbPath, "", vaultPath, backupDir, 10)
++	if err != nil {
++		t.Fatalf("Snapshot: %v", err)
++	}
++
++	if err := ConsumeVaultBackup(result.Dir); err != nil {
++		t.Fatalf("ConsumeVaultBackup: %v", err)
++	}
++	if _, err := os.Stat(filepath.Join(result.Dir, "secrets.kdbx")); !os.IsNotExist(err) {
++		t.Fatalf("vault copy still present after ConsumeVaultBackup: %v", err)
++	}
++	if _, err := os.Stat(filepath.Join(result.Dir, "execution.db")); err != nil {
++		t.Fatalf("execution.db removed alongside the vault copy: %v", err)
++	}
++}
++
++func TestConsumeVaultBackup_NoVaultCopyIsNotAnError(t *testing.T) {
++	dbPath := newTestDB(t)
++	backupDir := t.TempDir()
++
++	result, err := Snapshot(dbPath, "", "", backupDir, 10)
++	if err != nil {
++		t.Fatalf("Snapshot: %v", err)
++	}
++
++	if err := ConsumeVaultBackup(result.Dir); err != nil {
++		t.Fatalf("ConsumeVaultBackup on a backup with no vault copy: %v", err)
++	}
++}
++
++func TestLatestVaultBackupDir_MovesToNextOlderOnceConsumed(t *testing.T) {
++	dbPath := newTestDB(t)
++	backupDir := t.TempDir()
++	vaultPath := filepath.Join(t.TempDir(), "secrets.kdbx")
++	if err := os.WriteFile(vaultPath, []byte("older-vault-bytes"), 0o600); err != nil {
++		t.Fatalf("write vault fixture: %v", err)
++	}
++	older, err := Snapshot(dbPath, "", vaultPath, backupDir, 10)
++	if err != nil {
++		t.Fatalf("first Snapshot (with vault): %v", err)
++	}
++	time.Sleep(2 * time.Millisecond)
++	newer, err := Snapshot(dbPath, "", vaultPath, backupDir, 10)
++	if err != nil {
++		t.Fatalf("second Snapshot (with vault): %v", err)
++	}
++
++	dir, t1, err := LatestVaultBackupDir(backupDir)
++	if err != nil {
++		t.Fatalf("LatestVaultBackupDir: %v", err)
++	}
++	if dir != newer.Dir || t1.Before(newer.TakenAt.Add(-time.Second)) {
++		t.Fatalf("LatestVaultBackupDir = %q, %v; want the newer backup %q", dir, t1, newer.Dir)
++	}
++
++	if err := ConsumeVaultBackup(dir); err != nil {
++		t.Fatalf("ConsumeVaultBackup: %v", err)
++	}
++
++	dir2, _, err := LatestVaultBackupDir(backupDir)
++	if err != nil {
++		t.Fatalf("LatestVaultBackupDir (after consume): %v", err)
++	}
++	if dir2 != older.Dir {
++		t.Fatalf("LatestVaultBackupDir after consuming the newer one = %q, want the older backup %q", dir2, older.Dir)
++	}
++}
+diff --git a/internal/adapters/secretvault/secretvault.go b/internal/adapters/secretvault/secretvault.go
+index 57c60501e33b8a8aa0fdd76db4e0c76e60deb05c..8a9f9cf2d2988128002f2506f1efff14f50352c7 100644
+--- a/internal/adapters/secretvault/secretvault.go
++++ b/internal/adapters/secretvault/secretvault.go
+@@ -72,6 +72,11 @@ type Vault interface {
+ 	Exists() bool
+ 	// Unlocked reports whether the vault is currently open in memory.
+ 	Unlocked() bool
++	// Path returns the filesystem path this vault reads/writes -- the
++	// same identity a caller restoring a backup into place, or
++	// archiving the current file, needs to target explicitly rather
++	// than re-deriving it (goal 0359).
++	Path() string
+ 	// Create makes a brand-new, empty vault file at Path, encrypted with
+ 	// masterKey, and leaves it unlocked (ready to use immediately --
+ 	// matches every other manager's own "create = you're now in it"
+@@ -155,6 +160,12 @@ func (v *fileVault) Unlocked() bool {
+ 	return v.db != nil
+ }
+ 
++// Path never changes for a given fileVault (immutable since New), so
++// this needs no lock.
++func (v *fileVault) Path() string {
++	return v.path
++}
++
+ func (v *fileVault) Create(masterKey []byte) (string, error) {
+ 	v.mu.Lock()
+ 	defer v.mu.Unlock()
+diff --git a/internal/services/secretsvc/secretservice.go b/internal/services/secretsvc/secretservice.go
+index a669b0927c9e3373dede45628494da81b51824f7..682d6584305198ca95e7541a49218e986dd04a63 100644
+--- a/internal/services/secretsvc/secretservice.go
++++ b/internal/services/secretsvc/secretservice.go
+@@ -121,6 +121,11 @@ type SecretService struct {
+ 	// the vault through this service, so holding the lock across them
+ 	// would deadlock.
+ 	afterUnlock []func()
++	// backupDir is the local backup rotation's own root directory
++	// (main.go's MILL_BACKUP_DIR-resolved path) -- "" until SetBackupDir
++	// wires it, which makes RestoreVaultFromLatestBackup refuse rather
++	// than search a directory nobody configured (secretservice_restore.go).
++	backupDir string
+ }
+ 
+ // NewSecretService constructs the service and starts the auto-lock poll
+diff --git a/internal/services/secretsvc/secretservice_auth_test.go b/internal/services/secretsvc/secretservice_auth_test.go
+index 011b02d89b4f340677d5c0e94236b2857f755c10..664346747604f594bed824de1fa70a64c8f58239 100644
+--- a/internal/services/secretsvc/secretservice_auth_test.go
++++ b/internal/services/secretsvc/secretservice_auth_test.go
+@@ -24,6 +24,7 @@ type fakeVault struct {
+ 	unlocked    bool
+ 	opensWith   string
+ 	id          string
++	path        string
+ 	assignCalls int
+ 	backupCalls int
+ }
+@@ -40,6 +41,12 @@ func (f *fakeVault) Unlocked() bool {
+ 	return f.unlocked
+ }
+ 
++func (f *fakeVault) Path() string {
++	f.mu.Lock()
++	defer f.mu.Unlock()
++	return f.path
++}
++
+ func (f *fakeVault) Create(masterKey []byte) (string, error) {
+ 	f.mu.Lock()
+ 	defer f.mu.Unlock()
+diff --git a/internal/services/secretsvc/secretservice_restore.go b/internal/services/secretsvc/secretservice_restore.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..bf83fbcc52b1d1f0c5b5f775f3430f314a2f2948
+--- /dev/null
++++ b/internal/services/secretsvc/secretservice_restore.go
+@@ -0,0 +1,70 @@
++package secretsvc
++
++import (
++	"fmt"
++
++	"github.com/alicoding/mill/internal/adapters/backup"
++	"github.com/alicoding/mill/internal/services/dataevent"
++)
++
++// SetBackupDir wires the local backup rotation's own root directory
++// (main.go's MILL_BACKUP_DIR-resolved path) -- called once from
++// wiring.WireSecrets, after that path is resolved. Exported for wiring
++// only, never a frontend RPC.
++//
++//wails:ignore
++func (s *SecretService) SetBackupDir(dir string) {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	s.backupDir = dir
++}
++
++// RestoreVaultFromLatestBackup is the key-mismatch state's own door out
++// (goal 0359) when the current vault file is unreadable but a local
++// backup still carries one: archives the current file exactly as
++// ResetVault does (its own timestamped .bak.kdbx sibling, nothing
++// deleted), copies the newest backup's vault copy into the now-empty
++// target, and consumes that one backup's own copy so a repeated attempt
++// (this one didn't help either) moves on to the next-older backup
++// rather than restoring the identical file again. Never unlocks on its
++// own -- the restored file's identity picks its own key slot, and
++// whether THAT key is still in the keychain is exactly what the next
++// Unlock click answers.
++func (s *SecretService) RestoreVaultFromLatestBackup() error {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++
++	if !s.vault.Exists() {
++		return fmt.Errorf("no vault file to restore over")
++	}
++	if s.backupDir == "" {
++		return fmt.Errorf("no backup directory configured")
++	}
++
++	backupDir, _, err := backup.LatestVaultBackupDir(s.backupDir)
++	if err != nil {
++		return fmt.Errorf("finding a backup with a vault: %w", err)
++	}
++	if backupDir == "" {
++		return fmt.Errorf("no backup carries a vault")
++	}
++
++	if _, err := s.vault.Backup(); err != nil {
++		return fmt.Errorf("archiving the current vault file: %w", err)
++	}
++
++	restored, err := backup.RestoreVault(backupDir, s.vault.Path())
++	if err != nil {
++		return fmt.Errorf("restoring the vault from backup: %w", err)
++	}
++	if !restored {
++		return fmt.Errorf("restore vault: target still occupied after archiving it")
++	}
++
++	if err := backup.ConsumeVaultBackup(backupDir); err != nil {
++		return fmt.Errorf("consuming the used backup: %w", err)
++	}
++
++	dataevent.Emit("secret", "")
++	return nil
++}
+diff --git a/internal/services/secretsvc/secretservice_restore_test.go b/internal/services/secretsvc/secretservice_restore_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..e5329be7e9a1feaab5fd809008ff93de1776527c
+--- /dev/null
++++ b/internal/services/secretsvc/secretservice_restore_test.go
+@@ -0,0 +1,125 @@
++package secretsvc
++
++import (
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/alicoding/mill/internal/adapters/backup"
++	"github.com/alicoding/mill/internal/adapters/credential"
++)
++
++// RestoreVaultFromLatestBackup is the key-mismatch state's own door out
++// (goal 0359): archives whatever is currently at the vault's path
++// (unreadable or not -- that's the whole point) and brings the newest
++// backup's own vault copy in behind it, consuming that one backup's
++// copy so a repeated attempt moves on to the next-older one.
++func TestRestoreVaultFromLatestBackup_ArchivesCurrentFileAndBringsBackupIn(t *testing.T) {
++	dir := t.TempDir()
++	path := filepath.Join(dir, "secrets.kdbx")
++	creds := credential.NewInMemory()
++	s := newVaultAt(t, path, creds)
++	if err := s.SetupVault(); err != nil {
++		t.Fatalf("SetupVault: %v", err)
++	}
++	goodBytes, err := os.ReadFile(path) //nolint:gosec // t.TempDir()-scoped test fixture path
++	if err != nil {
++		t.Fatalf("read the just-created vault: %v", err)
++	}
++	s.LockVault()
++
++	backupDir := filepath.Join(dir, "backups")
++	backupSub := filepath.Join(backupDir, time.Now().Format(backup.TimestampLayout))
++	if err := os.MkdirAll(backupSub, 0o750); err != nil {
++		t.Fatalf("mkdir backup subdir: %v", err)
++	}
++	if err := os.WriteFile(filepath.Join(backupSub, "secrets.kdbx"), goodBytes, 0o600); err != nil { //nolint:gosec // t.TempDir()-scoped test fixture path
++		t.Fatalf("seed backup vault copy: %v", err)
++	}
++	s.SetBackupDir(backupDir)
++
++	// Stand in for the real defect: the file at path is still there but
++	// broken/unrelated -- Backup() only requires it to EXIST, never that
++	// it's readable.
++	if err := os.WriteFile(path, []byte("corrupted-vault-bytes"), 0o600); err != nil {
++		t.Fatalf("corrupt the live vault file: %v", err)
++	}
++
++	if err := s.RestoreVaultFromLatestBackup(); err != nil {
++		t.Fatalf("RestoreVaultFromLatestBackup: %v", err)
++	}
++
++	got, err := os.ReadFile(path) //nolint:gosec // t.TempDir()-scoped test fixture path
++	if err != nil {
++		t.Fatalf("read restored vault: %v", err)
++	}
++	if string(got) != string(goodBytes) {
++		t.Error("the live vault file after restore != the backup's own content")
++	}
++
++	entries, err := os.ReadDir(dir)
++	if err != nil {
++		t.Fatalf("ReadDir: %v", err)
++	}
++	var archived bool
++	for _, e := range entries {
++		if strings.HasPrefix(e.Name(), "secrets.") && strings.HasSuffix(e.Name(), ".bak.kdbx") {
++			archived = true
++			content, err := os.ReadFile(filepath.Join(dir, e.Name())) //nolint:gosec // t.TempDir()-scoped test fixture path
++			if err != nil {
++				t.Fatalf("read archived file: %v", err)
++			}
++			if string(content) != "corrupted-vault-bytes" {
++				t.Error("the archived file doesn't carry the pre-restore (broken) content")
++			}
++		}
++	}
++	if !archived {
++		t.Error("no .bak.kdbx archive of the pre-restore file was created")
++	}
++
++	if _, err := os.Stat(filepath.Join(backupSub, "secrets.kdbx")); !os.IsNotExist(err) {
++		t.Errorf("the used backup's own vault copy should be consumed, stat err = %v", err)
++	}
++}
++
++func TestRestoreVaultFromLatestBackup_NoVaultInBackupIsAnError(t *testing.T) {
++	dir := t.TempDir()
++	path := filepath.Join(dir, "secrets.kdbx")
++	s := newVaultAt(t, path, credential.NewInMemory())
++	if err := s.SetupVault(); err != nil {
++		t.Fatalf("SetupVault: %v", err)
++	}
++	s.LockVault()
++
++	backupDir := filepath.Join(dir, "backups")
++	// An existing backup subdirectory with no vault copy in it -- the
++	// same shape a pre-goal-0359 backup, or one taken before a vault
++	// ever existed, leaves behind.
++	backupSub := filepath.Join(backupDir, time.Now().Format(backup.TimestampLayout))
++	if err := os.MkdirAll(backupSub, 0o750); err != nil {
++		t.Fatalf("mkdir backup subdir: %v", err)
++	}
++	s.SetBackupDir(backupDir)
++
++	if err := s.RestoreVaultFromLatestBackup(); err == nil {
++		t.Fatal("RestoreVaultFromLatestBackup with no vault in any backup = nil error, want one")
++	}
++}
++
++func TestRestoreVaultFromLatestBackup_NoBackupDirConfiguredIsAnError(t *testing.T) {
++	dir := t.TempDir()
++	path := filepath.Join(dir, "secrets.kdbx")
++	s := newVaultAt(t, path, credential.NewInMemory())
++	if err := s.SetupVault(); err != nil {
++		t.Fatalf("SetupVault: %v", err)
++	}
++	s.LockVault()
++	// SetBackupDir deliberately never called.
++
++	if err := s.RestoreVaultFromLatestBackup(); err == nil {
++		t.Fatal("RestoreVaultFromLatestBackup with no backup directory configured = nil error, want one")
++	}
++}
+diff --git a/internal/services/wiring/wiring_secrets.go b/internal/services/wiring/wiring_secrets.go
+index cad5cb4ab199b6b318d72e01e149eed56eef35c7..4702d48ccf81f26ea80bb2242cbd82dec4c4d256 100644
+--- a/internal/services/wiring/wiring_secrets.go
++++ b/internal/services/wiring/wiring_secrets.go
+@@ -24,9 +24,11 @@ import (
+ // WireSecrets constructs the vault (goal 0185) at vaultPath, sharing
+ // credentials with configuresvc's own HTTPRequest/AIProvider secrets --
+ // same OS keychain, its own well-known id. Pulled out of main.go for the
+-// same 500-line reason WireRemoteAuth above is; vaultPath's own
+-// MILL_SECRETS_PATH-override-or-default resolution stays in main.go
+-// (depguard: this package doesn't import wails/v3/pkg/application).
++// same 500-line reason WireRemoteAuth above is; vaultPath/backupDir's
++// own MILL_SECRETS_PATH/MILL_BACKUP_DIR-override-or-default resolution
++// stays in main.go (depguard: this package doesn't import
++// wails/v3/pkg/application). backupDir feeds SecretService.SetBackupDir
++// (goal 0359's own restore-from-backup door on the key-mismatch state).
+ // WireSecrets also wires configureService's own two vault-reference
+ // seams onto the newly-constructed SecretService: SetSecretResolver
+ // (goal 0185 S3, "vault:" env/header values) and, goal 0203 S2,
+@@ -38,8 +40,11 @@ import (
+ // Order-independent of GuardrailService's own construction:
+ // SetSecretLabelsLookup only sets a package-level var, read lazily by
+ // GuardrailStep at evaluation time, never at wiring time.
+-func WireSecrets(vaultPath string, credentials credential.Store, store settings.Store, configureService *configuresvc.ConfigureService) *secretsvc.SecretService {
++func WireSecrets(vaultPath, backupDir string, credentials credential.Store, store settings.Store, configureService *configuresvc.ConfigureService) *secretsvc.SecretService {
+ 	secretService := secretsvc.NewSecretService(secretvault.New(vaultPath), credentials, store)
++	// goal 0359: the key-mismatch state's own restore-from-backup door
++	// needs to know where local backups live.
++	secretService.SetBackupDir(backupDir)
+ 	// One-time move off the inert ACL-gated keychain item onto the
+ 	// setting-backed unlock gate (goal 0330). No-op on every launch after
+ 	// the first, and on every install that never enabled the old one.
+diff --git a/main.go b/main.go
+index c806cfcef1abad0dea36b618d8ca809e2b8c02cb..13e280c0d8480aee58031c1a3667521d6148c4ae 100644
+--- a/main.go
++++ b/main.go
+@@ -141,7 +141,10 @@ func main() {
+ 	configureService := configuresvc.NewConfigureService(settingsStore, compositionService, credentialStore)
+ 	// MILL_SECRETS_PATH overrides for e2e isolation, same convention as MILL_SETTINGS_PATH above (WireSecrets' own doc comment covers the rest of what this wires). Captured in its own variable -- backupsvc's own wiring below needs the identical path, so every backup carries the vault file (goal 0359).
+ 	vaultPath := windowing.ConfigDirOrEnv("MILL_SECRETS_PATH", "secrets.kdbx")
+-	secretService := wiring.WireSecrets(vaultPath, credentialStore, settingsStore, configureService)
++	// MILL_BACKUP_DIR follows the same override convention, captured
++	// here (ahead of backupsvc's own construction below) since WireSecrets needs it too (goal 0359's restore-from-backup door).
++	backupDir := windowing.ConfigDirOrEnv("MILL_BACKUP_DIR", "backups")
++	secretService := wiring.WireSecrets(vaultPath, backupDir, credentialStore, settingsStore, configureService)
+ 	wiring.WireSecretRedaction(secretService) // goal 0185 S4
+ 	// docs/adr/0038: Atlas's storage/CRUD layer (cross-surface wiring
+ 	// arrives below via injected seams, never direct imports).
+@@ -170,9 +173,6 @@ func main() {
+ 		executionDatabaseURL = "sqlite:" + windowing.ConfigDirOrEnv("MILL_EXECUTION_DB_PATH", "execution.db")
+ 	}
+ 
+-	// MILL_BACKUP_DIR follows the same override convention as above;
+-	// docs/goals/0065's backupService construction reuses this value.
+-	backupDir := windowing.ConfigDirOrEnv("MILL_BACKUP_DIR", "backups")
+ 	backupsvc.GuardVersionChange(logger, settingsStore, backupsvc.SQLiteDBPath(executionDatabaseURL), settingsPath, vaultPath, backupDir, millVersion)
+ 
+ 	mcpAuditService := wiring.WireAuditTrails(secretService, backupsvc.SQLiteDBPath(executionDatabaseURL), logger)

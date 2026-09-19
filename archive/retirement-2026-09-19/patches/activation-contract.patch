@@ -1,0 +1,433 @@
+diff --git a/frontend/e2e/atlas-node-input-contract.spec.ts b/frontend/e2e/atlas-node-input-contract.spec.ts
+index 3912781d257d6b845bb51e7ce95bfbd6e3732621..e346a77f39076e2f510f474300a315ff1477dada 100644
+--- a/frontend/e2e/atlas-node-input-contract.spec.ts
++++ b/frontend/e2e/atlas-node-input-contract.spec.ts
+@@ -41,12 +41,6 @@ interface InputNoun {
+   // scroller (a vendored pan/zoom viewer, a viewer in its own frame):
+   // the wheel must stay with it and the board must not move.
+   consumesWheel: boolean
+-  // Whether the object's chrome band is reachable by a real pointer in
+-  // this harness. A vendored viewer that floats its own toolbar over the
+-  // object covers the band, leaving no band pixel an actionability check
+-  // can settle on -- the band's own contract is then proven by the specs
+-  // that drive that viewer directly.
+-  bandReachable: boolean
+   editable: boolean
+   create: (page: Page, dir: string) => Promise<Locator>
+ }
+@@ -89,7 +83,6 @@ async function dropNoun(page: Page, kind: string, file: string, y: number): Prom
+ const NOUNS: InputNoun[] = [
+   {
+     kind: 'table',
+-    bandReachable: true,
+     hint: 'Click to select, then click a cell to edit',
+     scroller: (object) => object.locator('.dvn-scroller').first(),
+     scrollAxis: 'left',
+@@ -106,7 +99,6 @@ const NOUNS: InputNoun[] = [
+   },
+   {
+     kind: 'sheet',
+-    bandReachable: true,
+     hint: 'Click to select, then scroll or edit.',
+     scroller: (object) => object.getByTestId('atlas-object-sheet-grid').locator('xpath=..'),
+     scrollAxis: 'top',
+@@ -120,7 +112,6 @@ const NOUNS: InputNoun[] = [
+   },
+   {
+     kind: 'diagram',
+-    bandReachable: false,
+     hint: 'Click to select, then drag to pan',
+     scroller: null,
+     scrollAxis: 'top',
+@@ -136,7 +127,6 @@ const NOUNS: InputNoun[] = [
+   },
+   {
+     kind: 'pdf',
+-    bandReachable: true,
+     hint: 'Click to select, then scroll to read',
+     scroller: null,
+     scrollAxis: 'top',
+@@ -160,9 +150,7 @@ function scrollOffsets(scroller: Locator): Promise<{ left: number; top: number }
+ 
+ // A point on the chrome band, in the band's own SCREEN pixels: the band
+ // is 14 CSS px tall and the board renders its objects scaled, so a fixed
+-// offset walks off the band at anything but zoom 1. Left-of-centre on
+-// purpose -- a vendored viewer appends its own chrome to the page, over
+-// the middle of the object.
++// offset walks off the band at anything but zoom 1.
+ async function bandPoint(band: Locator): Promise<{ x: number; y: number }> {
+   const box = await band.boundingBox()
+   if (!box) throw new Error('the chrome band has no bounding box')
+@@ -244,30 +232,28 @@ for (const noun of NOUNS) {
+       // pointer can consume it, so the frame hands it back to the
+       // canvas and the board pans -- the live face never turns the
+       // whole object into a dead zone.
+-      if (noun.bandReachable) {
+-        await wheelAt(page, band, 0, 60, await bandPoint(band))
+-        await expect.poll(() => viewportTransform(page)).not.toBe(liveTransform)
+-        // Bring the object back clear of the toolbar before the drag
+-        // below measures against it -- panned from the BOARD's own
+-        // corner, since the wheel just moved the band itself.
+-        await revealBelowChrome(page, object)
+-        await waitForViewportStable(board)
++      await wheelAt(page, band, 0, 60, await bandPoint(band))
++      await expect.poll(() => viewportTransform(page)).not.toBe(liveTransform)
++      // Bring the object back clear of the toolbar before the drag
++      // below measures against it -- panned from the BOARD's own
++      // corner, since the wheel just moved the band itself.
++      await revealBelowChrome(page, object)
++      await waitForViewportStable(board)
+ 
+-        // The band drags the object; the live face does not. The drag
+-        // runs ALONG the band rather than down into the face: the object
+-        // travels with the pointer, so a downward path would cross into
+-        // an embedded viewer's own frame, which swallows every move
+-        // after the press.
+-        const startX = await objectLeft(object)
+-        const bandBox = await band.boundingBox()
+-        if (!bandBox) throw new Error('the chrome band has no bounding box')
+-        // The drag's END is a bare page point, never an element-bound
+-        // one: the object itself is what moves, so nothing owns the
+-        // release pixel by the time the pointer gets there
+-        // (dragBetween's own endpoint contract).
+-        await dragBetween(page, { locator: band, position: await bandPoint(band) }, { x: bandBox.x + 80, y: bandBox.y + bandBox.height / 2 })
+-        await expect.poll(() => objectLeft(object)).not.toBe(startX)
+-      }
++      // The band drags the object; the live face does not. The drag
++      // runs ALONG the band rather than down into the face: the object
++      // travels with the pointer, so a downward path would cross into
++      // an embedded viewer's own frame, which swallows every move
++      // after the press.
++      const startX = await objectLeft(object)
++      const bandBox = await band.boundingBox()
++      if (!bandBox) throw new Error('the chrome band has no bounding box')
++      // The drag's END is a bare page point, never an element-bound
++      // one: the object itself is what moves, so nothing owns the
++      // release pixel by the time the pointer gets there
++      // (dragBetween's own endpoint contract).
++      await dragBetween(page, { locator: band, position: await bandPoint(band) }, { x: bandBox.x + 80, y: bandBox.y + bandBox.height / 2 })
++      await expect.poll(() => objectLeft(object)).not.toBe(startX)
+       // The live face is NOT a drag surface: a drag inside it reaches
+       // only the face (a range selection, an engine's own pan).
+       const movedX = await objectLeft(object)
+diff --git a/frontend/src/atlas/AtlasBoardObjectNode.tsx b/frontend/src/atlas/AtlasBoardObjectNode.tsx
+index 4042033b971ff433e6144433e3d20664dae47d25..0b9ef22b33af00f4d08d7fe6478dae76d7f4cd69 100644
+--- a/frontend/src/atlas/AtlasBoardObjectNode.tsx
++++ b/frontend/src/atlas/AtlasBoardObjectNode.tsx
+@@ -9,7 +9,7 @@ import { usePluginReloadVersion } from '../plugins/pluginReloadSignal'
+ import { unknownKindContent } from './atlasBoardObjectContent'
+ import type { AtlasBoardObjectContent } from './atlasBoardObjectContent'
+ import { activation, boxOptsOutOfCanvasWheel, contentOptsOutOfCanvasDrag, shieldUp } from './atlasActivation'
+-import type { AtlasActivation, AtlasContentMode } from './atlasActivation'
++import type { AtlasActivation, AtlasInputMode } from './atlasActivation'
+ import { useAtlasObjectInputBoundary } from './useAtlasObjectInputBoundary'
+ import { AtlasShapeRotateHandle } from './AtlasShapeRotateHandle'
+ import { useAtlasMirrorChanged } from './useAtlasMirrorChanged'
+@@ -90,18 +90,18 @@ function objectBoxClassName(state: AtlasActivation): string {
+ // drag inside it must reach only the face -- the chrome band stays the
+ // object's drag surface. An idle interactive face is inert instead, so
+ // nothing under the shield can swallow the click that selects.
+-function objectContentClassName(state: AtlasActivation, content: AtlasContentMode): string {
++function objectContentClassName(state: AtlasActivation, input: AtlasInputMode): string {
+   if (contentOptsOutOfCanvasDrag(state)) return `${styles.content} nodrag nopan`
+-  return content === 'interactive' ? `${styles.content} ${styles.contentInert}` : styles.content
++  return input === 'interactive' ? `${styles.content} ${styles.contentInert}` : styles.content
+ }
+ 
+ // useObjectActivation resolves this object's one input state and hands
+ // back the channel its face reports an open editor through (goal 0354).
+ // A deselect drops the report: an idle face has no editor the user can
+ // still be typing in, whatever it last said.
+-function useObjectActivation(content: AtlasContentMode, live: boolean): { state: AtlasActivation; onEditingChange: (editing: boolean) => void } {
++function useObjectActivation(input: AtlasInputMode, live: boolean): { state: AtlasActivation; onEditingChange: (editing: boolean) => void } {
+   const [faceEditing, setFaceEditing] = useState(false)
+-  const state = activation(live, faceEditing, content)
++  const state = activation(live, faceEditing, input)
+   useEffect(() => { if (state === 'idle') setFaceEditing(false) }, [state])
+   const onEditingChange = useCallback((editing: boolean) => { setFaceEditing(editing) }, [])
+   return { state, onEditingChange }
+@@ -128,8 +128,8 @@ function editDoor(object: BoardObject, facts: AtlasBoardObjectContent | undefine
+   return { route, editable: !preview && route?.kind === 'embedded-engine' }
+ }
+ 
+-function bandTitleKey(state: AtlasActivation, content: AtlasContentMode, shieldHintKey: string | undefined): string {
+-  if (content !== 'interactive' || state !== 'idle') return 'boardObject.dragHandleTitle'
++function bandTitleKey(state: AtlasActivation, input: AtlasInputMode, shieldHintKey: string | undefined): string {
++  if (input !== 'interactive' || state !== 'idle') return 'boardObject.dragHandleTitle'
+   return shieldHintKey ?? 'boardObject.shieldedBandTitle'
+ }
+ 
+@@ -192,7 +192,7 @@ function AtlasBoardObjectNodeInner({ id, data, selected }: NodeProps<AtlasBoardO
+   // The activation state (goal 0354): one contract for every noun and
+   // every plugin face, derived from the noun's declared content mode
+   // plus this object's own live state -- never a per-noun input flag.
+-  const { state, onEditingChange } = useObjectActivation(resolvedFacts.content, !!selected && !preview)
++  const { state, onEditingChange } = useObjectActivation(resolvedFacts.input, !!selected && !preview)
+   useAtlasObjectInputBoundary(boxRef, state)
+   // The Fit chip's own state (goal 0340): only the face can know
+   // whether what it renders currently needs more room than this box
+@@ -281,7 +281,7 @@ function AtlasBoardObjectNodeInner({ id, data, selected }: NodeProps<AtlasBoardO
+           it -- gating on dragBand removes it from those Kinds entirely
+           rather than leaving inert chrome. */}
+       {dragBand && !preview && (
+-        <div className={styles.frame} data-testid="atlas-board-object-frame" title={t(bandTitleKey(state, resolvedFacts.content, shieldHintKey))}>
++        <div className={styles.frame} data-testid="atlas-board-object-frame" title={t(bandTitleKey(state, resolvedFacts.input, shieldHintKey))}>
+           {/* The overflow escape hatch (goal 0340): shown at rest and
+               while selected, never hover-gated -- "this is bigger than
+               what you can see" is a fact about the object, not a
+@@ -306,7 +306,7 @@ function AtlasBoardObjectNodeInner({ id, data, selected }: NodeProps<AtlasBoardO
+           like a body; selecting lifts the shield and the face goes
+           live. The band above stays uncovered where a Kind declares one
+           -- it is that Kind's only drag surface. */}
+-      {shieldUp(resolvedFacts.content, state, preview) && <div className={clickShieldClassName(dragBand)} data-testid="atlas-object-click-shield" />}
++      {shieldUp(resolvedFacts.input, state, preview) && <div className={clickShieldClassName(dragBand)} data-testid="atlas-object-click-shield" />}
+       {/* Suspense boundary for every Kind uniformly, a no-op for a
+           synchronously-imported Component (shape/image/ink) and the
+           real code-split boundary for a lazy one (table/diagram, whose
+@@ -325,7 +325,7 @@ function AtlasBoardObjectNodeInner({ id, data, selected }: NodeProps<AtlasBoardO
+           node, shift/meta adds to the selection, and a click on an
+           already-selected node changes nothing. */}
+       <div
+-        className={objectContentClassName(state, resolvedFacts.content)}
++        className={objectContentClassName(state, resolvedFacts.input)}
+         onPointerDownCapture={dragBand ? (e) => {
+           // Primary button only: a right-click must reach the context
+           // menu with the CURRENT selection intact (a multi-select
+diff --git a/frontend/src/atlas/atlasActivation.ts b/frontend/src/atlas/atlasActivation.ts
+index 30f85f1a713e121402cf557a9f604dd4523d9015..3524205c5b61881d608f4aa897cd0cb857b22b88 100644
+--- a/frontend/src/atlas/atlasActivation.ts
++++ b/frontend/src/atlas/atlasActivation.ts
+@@ -18,15 +18,15 @@
+ //   editing  -- as selected, plus the face has an editor open, so the
+ //               frame keeps the board's own keymap out of the way.
+ 
+-export type AtlasContentMode = 'static' | 'interactive'
++export type AtlasInputMode = 'static' | 'interactive'
+ export type AtlasActivation = 'idle' | 'selected' | 'editing'
+ 
+ // activation resolves the state. A `static` face is idle for input
+ // purposes whatever the selection is -- selecting a shape or an image
+ // never hands it the wheel, which is exactly today's behaviour for
+ // those Kinds. A frame's inert preview tile passes nodeSelected false.
+-export function activation(nodeSelected: boolean, faceEditing: boolean, content: AtlasContentMode): AtlasActivation {
+-  if (content !== 'interactive' || !nodeSelected) return 'idle'
++export function activation(nodeSelected: boolean, faceEditing: boolean, input: AtlasInputMode): AtlasActivation {
++  if (input !== 'interactive' || !nodeSelected) return 'idle'
+   return faceEditing ? 'editing' : 'selected'
+ }
+ 
+@@ -54,8 +54,8 @@ export function contentOptsOutOfCanvasDrag(state: AtlasActivation): boolean {
+ // while an interactive face is idle. Object first, content second --
+ // the first click always selects the object, so a bare click can never
+ // land straight in a cell or inside an embedded viewer.
+-export function shieldUp(content: AtlasContentMode, state: AtlasActivation, preview: boolean): boolean {
+-  return content === 'interactive' && state === 'idle' && !preview
++export function shieldUp(input: AtlasInputMode, state: AtlasActivation, preview: boolean): boolean {
++  return input === 'interactive' && state === 'idle' && !preview
+ }
+ 
+ // ScrollBox -- what wheelStaysLocal needs to know about one element on
+diff --git a/frontend/src/atlas/atlasBoardObjectContent.ts b/frontend/src/atlas/atlasBoardObjectContent.ts
+index d6e2f466eaeec37776bb366dcb0864f207f319f1..d71628496851e2190bb0acd49e940fd7ed562904 100644
+--- a/frontend/src/atlas/atlasBoardObjectContent.ts
++++ b/frontend/src/atlas/atlasBoardObjectContent.ts
+@@ -6,9 +6,9 @@ import type { EditRouteDecl, ObjectSource } from './objectSeams'
+ import type { MirrorReadState } from './useAtlasObjectMirrorRead'
+ import type { AtlasNounGroup, ExtensionSettingDecl } from './atlasNounRegistry'
+ import type { DrawioOverflowReporter } from './drawioInteraction'
+-import type { AtlasContentMode } from './atlasActivation'
++import type { AtlasInputMode } from './atlasActivation'
+ 
+-export type { AtlasContentMode }
++export type { AtlasInputMode }
+ import { AtlasUnknownKindContent } from './AtlasUnknownKindContent'
+ 
+ // The board-object CONTENT registry -- split out of atlasNounRegistry.ts
+@@ -87,7 +87,7 @@ export interface AtlasNounContent {
+   }>
+   ariaLabelKey: string
+   role: 'img' | undefined
+-  // content (goal 0354): the ONE input fact a noun declares about its
++  // input (goal 0354): the ONE input fact a noun declares about its
+   // own face -- 'static' (the canvas owns every gesture over it: a
+   // shape, an image, an ink stroke) or 'interactive' (the face
+   // scrolls, selects text, or edits in place: a grid, an embedded
+@@ -99,7 +99,7 @@ export interface AtlasNounContent {
+   // directly (registerNoun folds a tool's own `content` into the
+   // board-object content registry, so both routes reach
+   // AtlasBoardObjectNode.tsx as one record).
+-  content: AtlasContentMode
++  input: AtlasInputMode
+   // shieldHintKey (goal 0341): what the chrome band's tooltip says
+   // while this Kind's face is idle -- the first click always selects,
+   // but what it buys differs per noun (a diagram starts panning, a PDF
+@@ -241,7 +241,7 @@ export const unknownKindContent: AtlasBoardObjectContent = {
+   Component: AtlasUnknownKindContent,
+   ariaLabelKey: 'unknownKind.aria',
+   role: undefined,
+-  content: 'static',
++  input: 'static',
+   source: { kind: 'board-local' },
+   editRoute: { kind: 'none' },
+   dragBand: false,
+diff --git a/frontend/src/atlas/atlasNounDeclarationFields.json b/frontend/src/atlas/atlasNounDeclarationFields.json
+index d2b0e556a3a1ed19000f345f918594cbf0b21682..c02f9c4a60002483d04cdfab441aacbde59ccfeb 100644
+--- a/frontend/src/atlas/atlasNounDeclarationFields.json
++++ b/frontend/src/atlas/atlasNounDeclarationFields.json
+@@ -86,8 +86,8 @@
+   },
+   {
+     "field": "content",
+-    "legalValues": "an object with Component (a React component accepting { object, mirrorVersion }), ariaLabelKey (a string), role ('img' or undefined) and content ('static' or 'interactive'), plus the optional members source, editRoute, shieldHintKey, overflowChip and extension — or null",
+-    "meaning": "this noun's own placed-instance content contribution. registerNoun() feeds it into the board-object content registry (atlasNounRegistry.ts's registerBoardObjectContent) whenever boardObjectKind is non-null, killing AtlasBoardObjectNode.tsx's former per-Kind hand branch. A tool-less noun (diagram, sheet, pdf) calls registerBoardObjectContent directly instead of declaring this field at all, since it has no AtlasToolShape to satisfy — it instead sets this same content shape's own optional `extension` member (icon, label, description, disableScopeNote, group) so Settings > Extensions can still render an honest, correctly-sectioned row for it. mirrorVersion bumps on a live disk change to a fileBacked Kind's own mirrored file (see fileBacked below) — a non-file-backed Component simply ignores it. The nested `content` member is the ONE input fact a noun declares about its face: 'static' means the canvas owns every gesture over it (a shape, an image), 'interactive' means the face scrolls, selects text or edits in place (a grid, an embedded viewer). Every canvas opt-out — the click shield, the wheel and drag opt-outs, the keyboard boundary — is derived from it plus the object's own state, across three states: idle (the canvas owns the wheel, the drag and the keys, and a shield takes the first click), selected (the face receives pointer events and keys, and a wheel over anything in it that really scrolls stays inside it), and editing (the face reports an open editor through onEditingChange and the board's shortcuts stand down). shieldHintKey is the locale key for what the chrome band's tooltip says while the face is idle (what that first click buys differs per noun: a diagram starts panning, a PDF starts scrolling, a table starts cell editing); overflowChip lets the shared chrome band carry a “Fit” chip whenever the face reports its content is larger than the object's box."
++    "legalValues": "an object with Component (a React component accepting { object, mirrorVersion }), ariaLabelKey (a string), role ('img' or undefined) and input ('static' or 'interactive'), plus the optional members source, editRoute, shieldHintKey, overflowChip and extension — or null",
++    "meaning": "this noun's own placed-instance content contribution. registerNoun() feeds it into the board-object content registry (atlasNounRegistry.ts's registerBoardObjectContent) whenever boardObjectKind is non-null, killing AtlasBoardObjectNode.tsx's former per-Kind hand branch. A tool-less noun (diagram, sheet, pdf) calls registerBoardObjectContent directly instead of declaring this field at all, since it has no AtlasToolShape to satisfy — it instead sets this same content shape's own optional `extension` member (icon, label, description, disableScopeNote, group) so Settings > Extensions can still render an honest, correctly-sectioned row for it. mirrorVersion bumps on a live disk change to a fileBacked Kind's own mirrored file (see fileBacked below) — a non-file-backed Component simply ignores it. The nested `input` member is the ONE input fact a noun declares about its face: 'static' means the canvas owns every gesture over it (a shape, an image), 'interactive' means the face scrolls, selects text or edits in place (a grid, an embedded viewer). Every canvas opt-out — the click shield, the wheel and drag opt-outs, the keyboard boundary — is derived from it plus the object's own state, across three states: idle (the canvas owns the wheel, the drag and the keys, and a shield takes the first click), selected (the face receives pointer events and keys, and a wheel over anything in it that really scrolls stays inside it), and editing (the face reports an open editor through onEditingChange and the board's shortcuts stand down). shieldHintKey is the locale key for what the chrome band's tooltip says while the face is idle (what that first click buys differs per noun: a diagram starts panning, a PDF starts scrolling, a table starts cell editing); overflowChip lets the shared chrome band carry a “Fit” chip whenever the face reports its content is larger than the object's box."
+   },
+   {
+     "field": "capabilities",
+diff --git a/frontend/src/atlas/objectSeams.test.ts b/frontend/src/atlas/objectSeams.test.ts
+index 7add24a0c5f3d88524e49926b3fe4c1b3cd94c83..2875b30749a1ffc5a1a11b8c3737a4466647a500 100644
+--- a/frontend/src/atlas/objectSeams.test.ts
++++ b/frontend/src/atlas/objectSeams.test.ts
+@@ -48,7 +48,7 @@ describe('canvas-object extension contract (ADR-0046, goal 0244 S0)', () => {
+       Component: () => null,
+       ariaLabelKey: 'boardObject.imageAriaLabel',
+       role: undefined,
+-      content: 'static',
++      input: 'static',
+       dragBand: false,
+       fileBacked: false,
+       source: { kind: 'file', pathKey: 'mirrorPath' },
+@@ -81,7 +81,7 @@ describe('canvas-object extension contract (ADR-0046, goal 0244 S0)', () => {
+       Component: () => null,
+       ariaLabelKey: 'boardObject.tableAriaLabel',
+       role: undefined,
+-      content: 'static',
++      input: 'static',
+       dragBand: false,
+       fileBacked: true,
+       source: { kind: 'provider', refKey: 'listID' },
+@@ -109,7 +109,7 @@ describe('canvas-object extension contract (ADR-0046, goal 0244 S0)', () => {
+       Component: () => null,
+       ariaLabelKey: 'boardObject.shapeAriaLabel',
+       role: undefined,
+-      content: 'static',
++      input: 'static',
+       dragBand: false,
+       fileBacked: true,
+       source: { kind: 'board-local' },
+@@ -134,7 +134,7 @@ describe('canvas-object extension contract (ADR-0046, goal 0244 S0)', () => {
+       Component: () => null,
+       ariaLabelKey: 'boardObject.diagramAriaLabel',
+       role: 'img',
+-      content: 'static',
++      input: 'static',
+       dragBand: true,
+       fileBacked: true,
+       source: { kind: 'file', pathKey: 'mirrorPath' },
+diff --git a/frontend/src/atlas/tools/diagramNoun.ts b/frontend/src/atlas/tools/diagramNoun.ts
+index 35977d26c43f941800969a17b1eeb53355785be5..b70ea5f81e5c7f35af8b53c590ec4c243cc9c6ab 100644
+--- a/frontend/src/atlas/tools/diagramNoun.ts
++++ b/frontend/src/atlas/tools/diagramNoun.ts
+@@ -33,7 +33,7 @@ registerBoardObjectContent('diagram', {
+   // the board (pan, pinch and ⌘-scroll zoom, like over any object);
+   // selected, the viewer owns the wheel and the frame opts the board
+   // out.
+-  content: 'interactive',
++  input: 'interactive',
+   shieldHintKey: 'atlas:diagramNoun.shieldHint',
+   // overflowChip (goal 0340): a drawing is routinely larger than the
+   // box it sits in, and the face can fit it -- so the shared chrome
+diff --git a/frontend/src/atlas/tools/imageTool.ts b/frontend/src/atlas/tools/imageTool.ts
+index e1c2f8887afb3cb12911198cbf03a9352372fcd6..44ffe4fc66ef7ad6c987b5dc0510ed975e7f3c77 100644
+--- a/frontend/src/atlas/tools/imageTool.ts
++++ b/frontend/src/atlas/tools/imageTool.ts
+@@ -66,7 +66,7 @@ export const imageTool = {
+     ariaLabelKey: 'boardObject.imageAriaLabel',
+     // A rendered picture: nothing inside it scrolls, selects or edits,
+     // so the canvas owns every gesture over it (goal 0354).
+-    content: 'static',
++    input: 'static',
+     role: 'img',
+     // ADR-0046 (goal 0244 S0): Payload.mirrorPath is the real image
+     // file; "Open in default app" (useAtlasObjectMenu.ts) is this
+diff --git a/frontend/src/atlas/tools/pdfNoun.ts b/frontend/src/atlas/tools/pdfNoun.ts
+index 674be5f8547c1cbed8242af8cbc20286b359641f..6c7e56aba5943a8699d17124243307f9544228e8 100644
+--- a/frontend/src/atlas/tools/pdfNoun.ts
++++ b/frontend/src/atlas/tools/pdfNoun.ts
+@@ -28,7 +28,7 @@ registerBoardObjectContent('pdf', {
+   // The viewer scrolls, pages and selects text on its own (goal 0354):
+   // idle it is inert behind the shield, selected it owns the wheel, the
+   // drag and the keys inside its own document.
+-  content: 'interactive',
++  input: 'interactive',
+   shieldHintKey: 'atlas:pdfNoun.shieldHint',
+   // Payload.mirrorPath names the real .pdf file (goal 0232 S1's
+   // contract): shared watch + "Open in default app" enablement.
+diff --git a/frontend/src/atlas/tools/sheetNoun.ts b/frontend/src/atlas/tools/sheetNoun.ts
+index 89e5105033e945fde7c58f16ac6d80a8472f3f33..172bcaf4f5e46eae7246b901b772b5c40526b705 100644
+--- a/frontend/src/atlas/tools/sheetNoun.ts
++++ b/frontend/src/atlas/tools/sheetNoun.ts
+@@ -36,7 +36,7 @@ registerBoardObjectContent('sheet', {
+   // reachable -- object first, cell second, the same rule the table
+   // grid follows. No shieldHintKey: the generic wording is exactly
+   // what this face's first click buys.
+-  content: 'interactive',
++  input: 'interactive',
+   // Payload.mirrorPath names the real .xlsx/.csv file this content
+   // renders (goal 0232 S1's contract) -- the shared watch subscription
+   // and "Open in default app" enablement both key off this flag.
+diff --git a/frontend/src/atlas/tools/tableTool.ts b/frontend/src/atlas/tools/tableTool.ts
+index 2ae12b57f6be58a314fee45c39f49458a818c05c..012ae0e2dbaa4a0f9808ecb9f5ec0473e3662233 100644
+--- a/frontend/src/atlas/tools/tableTool.ts
++++ b/frontend/src/atlas/tools/tableTool.ts
+@@ -89,7 +89,7 @@ export const tableTool = {
+     // a bare click can never land straight in a cell. Selected, the
+     // grid owns the wheel over its own scroll area, which is how a
+     // table wider than its box scrolls sideways at all (goal 0354).
+-    content: 'interactive',
++    input: 'interactive',
+     shieldHintKey: 'atlas:tableNoun.shieldHint',
+     // ADR-0046 (goal 0244 S0): Payload.listID names the backing
+     // Configure List this Kind projects -- a provider source, not a
+diff --git a/frontend/src/atlas/useDrawioRendering.ts b/frontend/src/atlas/useDrawioRendering.ts
+index dc9855f528d9a628cbbb9416e3f4fa5bfd2aadab..26fb3de1b98dbf4bda9f0b15d5a1132fab7835ff 100644
+--- a/frontend/src/atlas/useDrawioRendering.ts
++++ b/frontend/src/atlas/useDrawioRendering.ts
+@@ -157,7 +157,22 @@ export function useDrawioRendering(ref: RefObject<HTMLElement | null>, xml: stri
+     // opening the editor. 'layers' (goal 0340) adds the viewer's own
+     // layer toggle, so a file that carries layers is readable one layer
+     // at a time without opening the editor either.
+-    host.setAttribute('data-mxgraph', JSON.stringify({ xml, resize: true, toolbar: 'pages zoom layers', editable: false, lightbox: false }))
++    // 'toolbar-position': 'bottom' -- the viewer's OWN config key
++    // (GraphViewer.addToolbar reads graphConfig['toolbar-position'];
++    // 'bottom' anchors the bar at the host's bottom edge instead of
++    // overlapping its top). On a board object the top edge is the
++    // shared chrome band -- the object's only drag and right-click
++    // surface -- and the bar is appended to document.body, so no
++    // z-order inside the object could ever win it back. The card
++    // page has no band and keeps the viewer's default top bar.
++    host.setAttribute('data-mxgraph', JSON.stringify({
++      xml,
++      resize: true,
++      toolbar: 'pages zoom layers',
++      ...(interactive ? { 'toolbar-position': 'bottom' } : null),
++      editable: false,
++      lightbox: false,
++    }))
+     loadDrawioViewer()
+       .then((GraphViewer) => {
+         if (cancelled) return
+diff --git a/frontend/src/plugins/canvasToolAdapter.ts b/frontend/src/plugins/canvasToolAdapter.ts
+index 3137ebb6f3c3dde1646059774f73cd14406f1826..8cc80aa65d3bb7353748747e445f6057cdb291dd 100644
+--- a/frontend/src/plugins/canvasToolAdapter.ts
++++ b/frontend/src/plugins/canvasToolAdapter.ts
+@@ -253,7 +253,7 @@ function faceContent(pluginId: string, decl: CanvasObjectDecl, ephemeral: boolea
+ 		// Input over the face (goal 0354): 'static' unless the plugin
+ 		// says otherwise, so a face that draws a picture keeps the whole
+ 		// canvas gesture set working over it exactly as before.
+-		content: decl.content === 'interactive' ? 'interactive' : 'static',
++		input: decl.content === 'interactive' ? 'interactive' : 'static',
+ 		source: decl.source === 'file' ? { kind: 'file', pathKey: 'mirrorPath' } : decl.source === 'url' ? { kind: 'url', urlKey: 'url' } : { kind: 'board-local' },
+ 		editRoute: adaptEditRoute(decl.editRoute),
+ 	}

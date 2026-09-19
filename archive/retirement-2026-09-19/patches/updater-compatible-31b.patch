@@ -1,0 +1,31 @@
+diff --git a/frontend/package-lock.json b/frontend/package-lock.json
+index 7d00ce46e5b2713f39cf6a8910f3faa25de60bc0..9017f03c51511699e2368d2e398f50defd4a3d0f 100644
+--- a/frontend/package-lock.json
++++ b/frontend/package-lock.json
+@@ -3156,7 +3156,7 @@
+       "version": "19.2.18",
+       "resolved": "https://registry.npmjs.org/@types/react/-/react-19.2.18.tgz",
+       "integrity": "sha512-AnzbBERsrLKtk2XSfTbYRLjQPdy116Sty4q+T+Bp3IC4l6jNBvreVPAHmpq9qhXQM7CXZPjLVmGMw9sy+hxQ3w==",
+-      "devOptional": true,
++      "dev": true,
+       "license": "MIT",
+       "dependencies": {
+         "csstype": "^3.2.2"
+@@ -3166,7 +3166,7 @@
+       "version": "19.2.7",
+       "resolved": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.2.7.tgz",
+       "integrity": "sha512-I8bPpDLcHBv1qiIiXDCy71Rt8eQDKJP0sMSWJphDdAcdqiJ1sGpZamavoEIRZmYzjia9LuEb2HlYdDpmoENpvQ==",
+-      "devOptional": true,
++      "dev": true,
+       "license": "MIT",
+       "peerDependencies": {
+         "@types/react": "^19.2.0"
+@@ -9945,7 +9945,7 @@
+       "version": "6.0.3",
+       "resolved": "https://registry.npmjs.org/typescript/-/typescript-6.0.3.tgz",
+       "integrity": "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==",
+-      "devOptional": true,
++      "dev": true,
+       "license": "Apache-2.0",
+       "bin": {
+         "tsc": "bin/tsc",
