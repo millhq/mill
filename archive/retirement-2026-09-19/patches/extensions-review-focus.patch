@@ -1,0 +1,1861 @@
+diff --git a/frontend/e2e/fixtures/settingsNav.ts b/frontend/e2e/fixtures/settingsNav.ts
+index 27fec1075377548dafa2354c8e743ddee882dc8e..9eecb669db0213ce9397fb9f80fe15e64d90212f 100644
+--- a/frontend/e2e/fixtures/settingsNav.ts
++++ b/frontend/e2e/fixtures/settingsNav.ts
+@@ -35,7 +35,7 @@ export function extensionRow(page: Page, id: string): Locator {
+ // plugins share one row component (goal 0321), so a bare
+ // extensions-row locator matches both.
+ export function builtInRows(page: Page): Locator {
+-  return page.locator('[data-testid^="extensions-group-"] [data-testid="extensions-row"]')
++  return page.getByTestId('extensions-built-in-group').getByTestId('extensions-row')
+ }
+ 
+ // An installed plugin's row.
+@@ -47,7 +47,7 @@ export function pluginRow(page: Page, id: string): Locator {
+ // only; every other fact about an extension reads in the pane.
+ export async function openExtensionDetail(page: Page, row: Locator, id: string): Promise<Locator> {
+   await row.scrollIntoViewIfNeeded()
+-  await row.getByTestId('extensions-row-open').click()
++  await row.click()
+   const detail = page.locator(`[data-testid="extensions-detail"][data-extension-id="${id}"]`)
+   await expect(detail).toBeVisible()
+   return detail
+diff --git a/frontend/e2e/settings-extensions-list.spec.ts b/frontend/e2e/settings-extensions-list.spec.ts
+index 35c5bde798892575618811ff631286af2db9651b..d422fe4e0eaf05df67d26c51432499950e53579a 100644
+--- a/frontend/e2e/settings-extensions-list.spec.ts
++++ b/frontend/e2e/settings-extensions-list.spec.ts
+@@ -7,7 +7,6 @@ import { spawnMillServer } from './fixtures/server'
+ import { SETTINGS_EXTENSIONS_LIST_MCP_BASE_PORT, SETTINGS_EXTENSIONS_LIST_SERVER_BASE_PORT } from './fixtures/serverPorts'
+ import { launchWithPlugins } from './fixtures/runtimePlugins'
+ import { openExtensions, pluginRow } from './fixtures/settingsNav'
+-import { builtInPluginCount } from './fixtures/registryCounts'
+ 
+ // The Installed plugins list on the one list standard (goal 0337 S2):
+ // its own toolbar (search, an own-item count) and the compiled-in
+@@ -34,20 +33,22 @@ test('the installed list wears the toolbar and collapses Built in once real plug
+     await expect(page.getByTestId('extensions-plugin-row')).toHaveCount(installedIds.length)
+ 
+     // Built in starts collapsed: the row is not rendered at all, not
+-    // merely hidden. Read off the same ListPlugins scan the row itself
+-    // counts (goal 0357 S2), so a future bundled plugin never needs a
+-    // matching edit here.
++    // merely hidden. The disclosure combines compiled Atlas nouns and
++    // bundled plugins, so derive the count from its own rendered rows
++    // instead of copying registry knowledge into this fixture.
+     const toggle = page.getByTestId('extensions-built-in-toggle')
+-    await expect(toggle).toHaveText(`Built in (${await builtInPluginCount(page)})`)
+     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+     await expect(pluginRow(page, 'mill-drawing')).toHaveCount(0)
+ 
+     await toggle.click()
+     await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+     await expect(pluginRow(page, 'mill-drawing')).toBeVisible()
++    const builtInCount = Number((await toggle.textContent())?.match(/\d+/)?.[0])
++    expect(builtInCount).toBeGreaterThan(0)
++    await expect(page.getByTestId('extensions-built-in-group').getByTestId('extensions-row')).toHaveCount(builtInCount)
+ 
+-    // The search box narrows the installed list by name/description.
+-    await page.getByTestId('inventory-search').fill('bookmark')
++    // One search box narrows every group by name/description.
++    await page.getByTestId('extensions-installed-search').fill('bookmark')
+     await expect(page.getByTestId('extensions-plugin-row')).toHaveCount(1) // count: fixture-owned -- one installed example matches "bookmark".
+ 
+     // mill-bookmark's face draws in its own entry page now (goal 0380
+diff --git a/frontend/e2e/settings-extensions.spec.ts b/frontend/e2e/settings-extensions.spec.ts
+index a7df557570a393113dd7b897359d5822b9fdfe35..6b3890066d0154fad67e778bc991f57083aaf45e 100644
+--- a/frontend/e2e/settings-extensions.spec.ts
++++ b/frontend/e2e/settings-extensions.spec.ts
+@@ -30,6 +30,8 @@ import { builtInRows, extensionRow, openExtensionDetail, openExtensions, openSet
+ async function openExtensionsSection(page: import('@playwright/test').Page) {
+   await openExtensions(page)
+   await expect(page.getByTestId('extensions-list')).toBeVisible()
++  const builtIns = page.getByTestId('extensions-built-in-toggle')
++  if (await builtIns.getAttribute('aria-expanded') === 'false') await builtIns.click()
+ }
+ 
+ test('A row carries no settings; clicking it opens the detail pane, and Escape returns focus to the row', async ({ page }) => {
+@@ -41,7 +43,7 @@ test('A row carries no settings; clicking it opens the detail pane, and Escape r
+   // command-verb phrase ("Add an image").
+   await expect(imageRow.getByTestId('extensions-row-title')).toHaveText('Image')
+   // Identity only: nothing unfolds inside a row any more.
+-  await expect(page.getByTestId('extensions-detail')).toHaveCount(0)
++  await expect(page.getByTestId('extensions-detail-empty')).toBeVisible()
+   await expect(imageRow.getByTestId('extensions-row-expanded')).toHaveCount(0)
+ 
+   const detail = await openExtensionDetail(page, imageRow, 'image')
+@@ -55,8 +57,8 @@ test('A row carries no settings; clicking it opens the detail pane, and Escape r
+   // Escape closes the pane and puts focus back on the row that opened
+   // it -- a keyboard user is never left behind in the list.
+   await page.keyboard.press('Escape')
+-  await expect(page.getByTestId('extensions-detail')).toHaveCount(0)
+-  await expect(imageRow.getByTestId('extensions-row-open')).toBeFocused()
++  await expect(page.getByTestId('extensions-detail-empty')).toBeVisible()
++  await expect(imageRow).toBeFocused()
+ })
+ 
+ test('The Sheet row opens a detail pane carrying its declared setting', async ({ page }) => {
+diff --git a/frontend/src/locales/en/common.json b/frontend/src/locales/en/common.json
+index 208b5707df39b6cd4cb313ed71549c907cebf89f..ee03c063166f1dbec0287c73d12e2d4a2c82dcec 100644
+--- a/frontend/src/locales/en/common.json
++++ b/frontend/src/locales/en/common.json
+@@ -484,6 +484,10 @@
+       "sources": "Extensions: marketplace sources",
+       "viewInstalled": "Extensions: view installed",
+       "importTheme": "Extensions: Import theme",
++      "openPluginsFolder": "Open plugins folder",
++      "reload": "Reload extensions",
++      "toggleAll": "Turn all extensions on or off",
++      "docs": "See how canvas objects work",
+       "checkUpdates": "Extensions: check for updates",
+       "updateAll": "Extensions: update all",
+       "retryUpdates": "Extensions: retry loading updates",
+diff --git a/frontend/src/locales/en/views.json b/frontend/src/locales/en/views.json
+index e3e794bda7d2ffccb7fbb79ecaa7d1053b17d91d..690898a1bb78feb71726947544eedeae1dda1389 100644
+--- a/frontend/src/locales/en/views.json
++++ b/frontend/src/locales/en/views.json
+@@ -86,6 +86,18 @@
+       "docs": "Docs",
+       "builtInTitle": "Built in",
+       "installedTitle": "Installed",
++      "inventoryAria": "Installed extensions",
++      "searchAria": "Search installed extensions",
++      "noMatches": "No extensions match “{{query}}”.",
++      "selectHeading": "Select an extension",
++      "selectDescription": "Choose an extension to see what it adds and manage it.",
++      "reviewRequiredTitle": "Review required",
++      "reviewRequiredDescription_one": "1 extension is off until you review what it can access.",
++      "reviewRequiredDescription_other": "{{count}} extensions are off until you review what they can access.",
++      "moreActionsMenu": "More actions",
++      "statusBlocked": "Blocked",
++      "statusUnavailable": "Unavailable",
++      "statusOff": "Off",
+       "backToList": "Extensions",
+       "detailAriaLabel": "{{name}} details",
+       "moreActions": "More actions for {{name}}",
+diff --git a/frontend/src/shared/commandContext.ts b/frontend/src/shared/commandContext.ts
+index 3874c62f38382926ab44714ce9655162c0893a46..2f548497623175808c78e55c494253a973d373a2 100644
+--- a/frontend/src/shared/commandContext.ts
++++ b/frontend/src/shared/commandContext.ts
+@@ -30,6 +30,7 @@ export type CommandContext =
+   | { kind: 'marketplaceEntry'; marketplace: string; pluginId: string }
+   | { kind: 'extensionInstallCandidate'; candidate: InstallCandidate }
+   | { kind: 'extensionInstallAttempt'; operationId: string }
++  | { kind: 'extensionInventory'; ids: string[]; allOff: boolean }
+   | { kind: 'card'; cardId: string }
+   // The List grid's live selection (goal 0349 S4): which rows the
+   // row-marker checkboxes hold, which column header is selected, and
+@@ -145,6 +146,10 @@ export function extensionInstallAttemptContext(ctx: CommandContext | undefined):
+   return ctx?.kind === 'extensionInstallAttempt' ? { operationId: ctx.operationId } : null
+ }
+ 
++export function extensionInventoryContext(ctx: CommandContext | undefined): { ids: string[]; allOff: boolean } | null {
++  return ctx?.kind === 'extensionInventory' ? { ids: ctx.ids, allOff: ctx.allOff } : null
++}
++
+ export function listGridContext(ctx: CommandContext | undefined): { listID: string; rowIDs: string[]; columnKey?: string; text?: string } | null {
+   return ctx?.kind === 'listGrid' ? { listID: ctx.listID, rowIDs: ctx.rowIDs, columnKey: ctx.columnKey, text: ctx.text } : null
+ }
+diff --git a/frontend/src/shared/commandsDeclaration.json b/frontend/src/shared/commandsDeclaration.json
+index d579a5d9b7af03384ffa425c93b1aa53ee583c63..b841bc5b72aa61f566170cf51626df91a1999cb7 100644
+--- a/frontend/src/shared/commandsDeclaration.json
++++ b/frontend/src/shared/commandsDeclaration.json
+@@ -1535,6 +1535,14 @@
+     "enabled": true,
+     "needs": null
+   },
++  {
++    "id": "extensions.docs",
++    "label": "See how canvas objects work",
++    "binding": null,
++    "surface": null,
++    "enabled": false,
++    "needs": null
++  },
+   {
+     "id": "extensions.exportAudit",
+     "label": "Export plugin audit",
+@@ -1591,6 +1599,22 @@
+     "enabled": false,
+     "needs": null
+   },
++  {
++    "id": "extensions.openPluginsFolder",
++    "label": "Open plugins folder",
++    "binding": null,
++    "surface": null,
++    "enabled": false,
++    "needs": null
++  },
++  {
++    "id": "extensions.reload",
++    "label": "Reload extensions",
++    "binding": null,
++    "surface": null,
++    "enabled": false,
++    "needs": null
++  },
+   {
+     "id": "extensions.retryRecovery",
+     "label": "Extensions: retry recovery",
+@@ -1623,6 +1647,14 @@
+     "enabled": false,
+     "needs": null
+   },
++  {
++    "id": "extensions.toggleAll",
++    "label": "Turn all extensions on or off",
++    "binding": null,
++    "surface": null,
++    "enabled": true,
++    "needs": "extensionInventory"
++  },
+   {
+     "id": "extensions.updateAll",
+     "label": "Extensions: update all",
+diff --git a/frontend/src/shared/extensionsCommands.ts b/frontend/src/shared/extensionsCommands.ts
+index 99d759a6f44038780dd2565f010d966c38f4bafe..0d93c38639062d9875a0be7b56e22a98a6162df9 100644
+--- a/frontend/src/shared/extensionsCommands.ts
++++ b/frontend/src/shared/extensionsCommands.ts
+@@ -1,6 +1,6 @@
+ import i18n from 'i18next'
+ import type { Command } from './commands'
+-import { entityContext, extensionInstallAttemptContext, extensionInstallCandidateContext, marketplaceSourceInputContext } from './commandContext'
++import { entityContext, extensionInstallAttemptContext, extensionInstallCandidateContext, extensionInventoryContext, marketplaceSourceInputContext } from './commandContext'
+ import { useAppStore } from './store'
+ import { useUISignalStore } from './uiSignalStore'
+ import { SettingsService } from './bindings'
+@@ -62,7 +62,7 @@ const EXTENSION_ROW_COMMANDS: Command[] = entityRowCommands<{ ID: string; Label:
+     off: { suffix: 'disable', label: 'commands.extension.disable' },
+     isOn: (item) => !useExtensionEnablementStore.getState().disabledExtensionIds.includes(item.ID),
+     set: (item, on) => SettingsService.SetExtensionEnabled(item.ID, on).then(refreshDisabledExtensions),
+-    enabled: (item) => !builtIn(item.ID),
++    enabled: () => true,
+   }],
+   extras: [{
+     // A built-in lives in the binary, so there is no folder to reveal.
+@@ -164,9 +164,48 @@ export const EXTENSIONS_COMMANDS: Command[] = [
+     run: () => {
+       const ids = pluginsAwaitingReviewIds()
+       useAppStore.getState().setView({ kind: 'extensions' })
+-      if (ids.length === 1) useUISignalStore.getState().requestExtensionReview(ids[0])
++      if (ids[0]) useUISignalStore.getState().requestExtensionReview(ids[0])
+     },
+   },
++  {
++    id: 'extensions.openPluginsFolder',
++    label: 'commands.extensions.openPluginsFolder',
++    defaultBinding: null,
++    paletteHidden: true,
++    run: () => PluginService.RevealPluginsDir(),
++  },
++  {
++    id: 'extensions.reload',
++    label: 'commands.extensions.reload',
++    defaultBinding: null,
++    paletteHidden: true,
++    run: () => window.location.reload(),
++  },
++  {
++    id: 'extensions.toggleAll',
++    label: 'commands.extensions.toggleAll',
++    defaultBinding: null,
++    needs: 'extensionInventory',
++    paletteHidden: true,
++    enabled: (ctx) => {
++      const inventory = extensionInventoryContext(ctx)
++      return Boolean(inventory?.ids.length) && !useExtensionRecoveryStore.getState().unresolved &&
++        !useExtensionUpdatesStore.getState().bulkActive && useExtensionMarketplaceInstallStore.getState().phase === 'idle'
++    },
++    run: async (ctx) => {
++      const inventory = extensionInventoryContext(ctx)
++      if (!inventory) return
++      for (const id of inventory.ids) await SettingsService.SetExtensionEnabled(id, inventory.allOff)
++      await refreshDisabledExtensions()
++    },
++  },
++  {
++    id: 'extensions.docs',
++    label: 'commands.extensions.docs',
++    defaultBinding: null,
++    paletteHidden: true,
++    run: () => useAppStore.getState().setView({ kind: 'docs', page: 'concepts/atlas.md' }),
++  },
+   {
+     id: 'extensions.sources',
+     label: 'commands.extensions.sources',
+diff --git a/frontend/src/views/ExtensionCollectionMenu.tsx b/frontend/src/views/ExtensionCollectionMenu.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..67fdfb073b14e388667caff27f6919588a6cbf49
+--- /dev/null
++++ b/frontend/src/views/ExtensionCollectionMenu.tsx
+@@ -0,0 +1,25 @@
++import { ActionList, ActionMenu } from '@primer/react'
++import { useTranslation } from 'react-i18next'
++import { commandLabel, findCommand, runCommand } from '../shared/commands'
++import type { CommandContext } from '../shared/commandContext'
++
++const COLLECTION_COMMANDS = ['extensions.openPluginsFolder', 'extensions.reload', 'extensions.exportAudit', 'extensions.toggleAll', 'extensions.docs'] as const
++
++export function ExtensionCollectionMenu({ context, allOff }: { context: CommandContext; allOff: boolean }) {
++  const { t } = useTranslation('views')
++  return (
++    <ActionMenu>
++      <ActionMenu.Button size="small" data-testid="extensions-more-actions">{t('settings.extensions.moreActionsMenu')}</ActionMenu.Button>
++      <ActionMenu.Overlay>
++        <ActionList>
++          {COLLECTION_COMMANDS.flatMap((id) => {
++            const command = findCommand(id)
++            if (!command || !(command.enabled?.(context) ?? true)) return []
++            const label = id === 'extensions.toggleAll' ? t(allOff ? 'settings.extensions.turnAllOn' : 'settings.extensions.turnAllOff') : commandLabel(command)
++            return [<ActionList.Item key={id} onSelect={() => void runCommand(id, context)} data-testid={`extensions-more-${id.split('.').pop()}`}>{label}</ActionList.Item>]
++          })}
++        </ActionList>
++      </ActionMenu.Overlay>
++    </ActionMenu>
++  )
++}
+diff --git a/frontend/src/views/ExtensionEnableButton.tsx b/frontend/src/views/ExtensionEnableButton.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..b002b0d7f2c304511a6087b56b35c070f9ca9edc
+--- /dev/null
++++ b/frontend/src/views/ExtensionEnableButton.tsx
+@@ -0,0 +1,15 @@
++import { Button } from '@primer/react'
++import { commandLabel, findCommand, runCommand } from '../shared/commands'
++import type { CommandContext } from '../shared/commandContext'
++import { EXTENSION_ENTITY } from '../shared/extensionsCommands'
++
++export function ExtensionEnableButton({ id, disabled }: { id: string; disabled: boolean }) {
++  const command = findCommand(disabled ? 'extension.enable' : 'extension.disable')
++  const context: CommandContext = { kind: 'entity', entity: EXTENSION_ENTITY, id }
++  if (!command || !(command.enabled?.(context) ?? true)) return null
++  return (
++    <Button size="small" onClick={() => void runCommand(command.id, context)} data-testid="extensions-detail-enable">
++      {commandLabel(command, context)}
++    </Button>
++  )
++}
+diff --git a/frontend/src/views/ExtensionRow.tsx b/frontend/src/views/ExtensionRow.tsx
+index af4902e3b5654f3537514589d991378e2801a978..a5ebb583a409b44f0d2aa7d478bc75573a92bf0c 100644
+--- a/frontend/src/views/ExtensionRow.tsx
++++ b/frontend/src/views/ExtensionRow.tsx
+@@ -1,84 +1,49 @@
+ import type { ReactNode } from 'react'
+ import type { Icon } from '@primer/octicons-react'
+-import { Label, Text, ToggleSwitch } from '@primer/react'
+-import { useDisplayDensity } from '../shared/density'
+-import { extensionRowPadY } from './extensionMeta'
+-import styles from './ExtensionsSection.module.css'
++import { ActionList } from '@primer/react'
+ 
+-// One Extensions row -- the SAME component for a built-in noun and an
+-// installed plugin (goal 0321). A row is identity only: icon, name,
+-// one line of description, and the control that turns it on. Nothing
+-// expands here: everything a row used to unfold inline (chips, the
+-// declared settings controls, reach, version, a docs link) lives in
+-// the detail pane the row opens, which is what stopped the list from
+-// being scannable.
+-//
+-// The row title region is a button and the toggle is its flex SIBLING,
+-// never a descendant: nesting a switch inside the row's own activation
+-// target makes one click mean two things, and puts an interactive
+-// element inside an interactive element.
+-export function ExtensionRow({ id, icon: RowIcon, name, description, control, enabled, selected, builtInLabel, toggleTestId = 'extensions-row-toggle', meta, actions, onSelect, onToggle }: {
++// The one selectable row for built-in nouns and installed plugins.
++// Primer owns focus, arrows and selected state; Mill supplies identity,
++// one priority status and the exceptional Review action.
++export function ExtensionRow({ id, icon: RowIcon, name, description, selected, status, reviewLabel, plugin, onSelect }: {
+   id: string
+   icon: Icon
+   name: string
+   description?: string
+-  // 'switch' renders the enable toggle; 'built-in' renders the label a
+-  // kernel object carries instead; 'none' is a plugin the user cannot
+-  // turn on from here (blocked by policy, or waiting to be allowed).
+-  control: 'switch' | 'built-in' | 'none'
+-  enabled: boolean
+   selected: boolean
+-  builtInLabel: string
+-  // The installed-plugin list keeps its own toggle hook so the plugin
+-  // specs address a plugin's switch without matching a built-in's.
+-  toggleTestId?: string
+-  // The trailing identity cluster (goal 0349): author, version and the
+-  // trust badge, before the control. Presentation the caller owns,
+-  // because only it knows which list this row is in.
+-  meta?: ReactNode
+-  // The row's own … menu, rendered after the control.
+-  actions?: ReactNode
++  status?: ReactNode
++  reviewLabel?: string
++  plugin?: boolean
+   onSelect: () => void
+-  onToggle: (enabled: boolean) => void
+ }) {
+-  const density = useDisplayDensity()
+-  const labelId = `extension-row-label-${id}`
+   return (
+-    <div
+-      className={styles.row}
+-      style={{ paddingBlock: extensionRowPadY(density) }}
+-      data-testid="extensions-row"
++    <ActionList.Item
++      selected={selected}
++      onSelect={onSelect}
++      data-testid={plugin ? 'extensions-plugin-row' : 'extensions-row'}
++      data-plugin-id={plugin ? id : undefined}
+       data-extension-id={id}
+-      data-selected={selected ? 'true' : undefined}
++      aria-current={selected ? 'true' : undefined}
+     >
+-      <button
+-        type="button"
+-        className={styles.rowButton}
+-        aria-current={selected ? 'true' : undefined}
+-        onClick={onSelect}
+-        data-testid="extensions-row-open"
+-      >
+-        <RowIcon size={16} className={styles.rowIcon} />
+-        <Text id={labelId} size="small" weight="semibold" className={styles.rowName} data-testid="extensions-row-title">{name}</Text>
+-        {description && (
+-          <Text size="small" className={styles.rowDescription} data-testid="extensions-row-description">{description}</Text>
+-        )}
+-      </button>
+-      <div className={styles.rowMeta}>
+-        {meta}
+-        {control === 'built-in' && <Label data-testid="extensions-row-built-in">{builtInLabel}</Label>}
+-        {control === 'switch' && (
+-          <ToggleSwitch
+-            aria-labelledby={labelId}
+-            checked={enabled}
+-            onChange={onToggle}
+-            size="small"
+-            className={styles.toggle}
+-            data-testid={toggleTestId}
+-          />
+-        )}
+-        {actions}
+-      </div>
+-    </div>
++      <ActionList.LeadingVisual><RowIcon size={16} /></ActionList.LeadingVisual>
++      <span data-testid="extensions-row-title">{name}</span>
++      {description && (
++        <ActionList.Description variant="inline" truncate>
++          <span data-testid="extensions-row-description">{description}</span>
++        </ActionList.Description>
++      )}
++      {status && <ActionList.TrailingVisual>{status}</ActionList.TrailingVisual>}
++      {reviewLabel && (
++        <ActionList.TrailingAction
++          as="button"
++          label={reviewLabel}
++          onClick={(event: React.MouseEvent) => {
++            event.stopPropagation()
++            onSelect()
++          }}
++          data-testid="extensions-row-review"
++        />
++      )}
++    </ActionList.Item>
+   )
+ }
+diff --git a/frontend/src/views/ExtensionRowMenu.tsx b/frontend/src/views/ExtensionRowMenu.tsx
+deleted file mode 100644
+index 62ec41a563edd1a0e19a0ec448f7e81def312746..0000000000000000000000000000000000000000
+--- a/frontend/src/views/ExtensionRowMenu.tsx
++++ /dev/null
+@@ -1,78 +0,0 @@
+-import { useState } from 'react'
+-import { useTranslation } from 'react-i18next'
+-import { ActionList, ActionMenu, IconButton } from '@primer/react'
+-import { KebabHorizontalIcon } from '@primer/octicons-react'
+-import { commandLabel, findCommand, runCommand } from '../shared/commands'
+-import type { CommandContext } from '../shared/commandContext'
+-import { EXTENSION_ENTITY } from '../shared/extensionsCommands'
+-import { ConfirmDialog } from '../shared/ConfirmDialog'
+-
+-// The row's … menu (docs/goals/0349). Every item RENDERS a registry
+-// command against this row's own context -- the menu decides nothing
+-// about whether an action applies, it asks the command's enabled().
+-// Removing a folder is the one item that confirms first: the folder
+-// leaves the plugins directory, and the confirm names which one.
+-const MENU_COMMANDS = ['extension.update', 'extension.checkUpdates', 'extension.enable', 'extension.disable', 'extension.reveal'] as const
+-
+-export function ExtensionRowMenu({ id, name }: { id: string; name: string }) {
+-  const { t } = useTranslation('views')
+-  const [confirming, setConfirming] = useState(false)
+-  const ctx: CommandContext = { kind: 'entity', entity: EXTENSION_ENTITY, id }
+-  const items = MENU_COMMANDS
+-    .flatMap((commandId) => {
+-      const command = findCommand(commandId)
+-      return command && (command.enabled?.(ctx) ?? true) ? [command] : []
+-    })
+-  const removeCommand = findCommand('extension.remove')
+-  const canRemove = removeCommand !== undefined && (removeCommand.enabled?.(ctx) ?? true)
+-  // The question is the command's own (goal 0346 slice B): the row
+-  // hosts the dialog, the family phrases it.
+-  const removeConfirm = removeCommand?.confirm?.(ctx) ?? null
+-  if (items.length === 0 && !canRemove) return null
+-
+-  return (
+-    <>
+-      <ActionMenu>
+-        <ActionMenu.Anchor>
+-          <IconButton
+-            icon={KebabHorizontalIcon}
+-            size="small"
+-            variant="invisible"
+-            aria-label={t('settings.extensions.moreActions', { name })}
+-            data-testid="extensions-row-menu"
+-          />
+-        </ActionMenu.Anchor>
+-        <ActionMenu.Overlay>
+-          <ActionList>
+-            {items.map((command) => (
+-              <ActionList.Item
+-                key={command.id}
+-                onSelect={() => { void runCommand(command.id, ctx) }}
+-                data-testid={`extensions-row-${command.id.replace('extension.', '')}`}
+-              >
+-                {commandLabel(command)}
+-              </ActionList.Item>
+-            ))}
+-            {canRemove && (
+-              <ActionList.Item variant="danger" onSelect={() => setConfirming(true)} data-testid="extensions-row-remove">
+-                {t('settings.extensions.remove')}
+-              </ActionList.Item>
+-            )}
+-          </ActionList>
+-        </ActionMenu.Overlay>
+-      </ActionMenu>
+-      {confirming && removeConfirm && (
+-        <ConfirmDialog
+-          title={removeConfirm.title}
+-          body={removeConfirm.body}
+-          confirmLabel={removeConfirm.confirmLabel}
+-          onCancel={() => setConfirming(false)}
+-          onConfirm={() => {
+-            setConfirming(false)
+-            void runCommand('extension.remove', ctx)
+-          }}
+-        />
+-      )}
+-    </>
+-  )
+-}
+diff --git a/frontend/src/views/ExtensionsBrowseTab.tsx b/frontend/src/views/ExtensionsBrowseTab.tsx
+index 77bf8df75b9a2b6ff2a400fd1c88ff9fd3ef1e76..cb433b4a55ce84ccccfc8302aea3c3f0ac3f7a28 100644
+--- a/frontend/src/views/ExtensionsBrowseTab.tsx
++++ b/frontend/src/views/ExtensionsBrowseTab.tsx
+@@ -151,6 +151,8 @@ export function ExtensionsBrowseTab({ sourcesRequest }: {
+   }
+   const directCommand = findCommand('extensions.install.prepare')
+   const canPrepareDirect = directCommand !== undefined && (directCommand.enabled?.(directContext) ?? true)
++  const importCommand = findCommand('extensions.importTheme')
++  const canImport = importCommand !== undefined && (importCommand.enabled?.() ?? true)
+ 
+   return (
+     <>
+@@ -159,9 +161,14 @@ export function ExtensionsBrowseTab({ sourcesRequest }: {
+           <Text as="p" size="small" className={listStyles.muted}>
+             {t(installedStateReady ? 'extensions.browse.subtitle' : 'extensions.browse.catalogSubtitle')}
+           </Text>
+-          <Button size="small" onClick={openSources} data-testid="extensions-sources-open">
+-            {t('extensions.sources.title')}
+-          </Button>
++          <Stack direction="horizontal" gap="condensed">
++            <Button size="small" disabled={!canImport} onClick={() => void runCommand('extensions.importTheme')} data-testid="extensions-import-theme">
++              {t('extensions.themeImport.button')}
++            </Button>
++            <Button size="small" onClick={openSources} data-testid="extensions-sources-open">
++              {t('extensions.sources.title')}
++            </Button>
++          </Stack>
+         </Stack>
+ 
+         {loading && (
+diff --git a/frontend/src/views/ExtensionsBuiltInDetail.tsx b/frontend/src/views/ExtensionsBuiltInDetail.tsx
+index a4da614352adbcf11683d3107f3bd3393434596f..5a73f343f4ce6ddc838a34f5d03c5c075b0d50c3 100644
+--- a/frontend/src/views/ExtensionsBuiltInDetail.tsx
++++ b/frontend/src/views/ExtensionsBuiltInDetail.tsx
+@@ -9,14 +9,17 @@ import {
+   versionLabel,
+   type ExtensionRowSource,
+ } from './extensionMeta'
++import { ExtensionEnableButton } from './ExtensionEnableButton'
+ 
+ // The detail pane for a COMPILED-IN noun (goal 0321): a thin adapter
+ // from the registry-derived row shape onto the one detail contract.
+ // Every value is read off the noun's own registered descriptor --
+ // nothing here is hand-curated per extension.
+-export default function ExtensionsBuiltInDetail({ row, appVersion, showBackLink, onClose }: {
++export default function ExtensionsBuiltInDetail({ row, appVersion, disabled, canDisable, showBackLink, onClose }: {
+   row: ExtensionRowSource
+   appVersion: string
++  disabled: boolean
++  canDisable: boolean
+   showBackLink: boolean
+   onClose: () => void
+ }) {
+@@ -36,6 +39,7 @@ export default function ExtensionsBuiltInDetail({ row, appVersion, showBackLink,
+     adds,
+     reach: reachLabel(row.capabilities),
+     provenance: appVersion ? versionLabel(appVersion) : t('settings.extensions.builtIn'),
++    actions: canDisable ? <ExtensionEnableButton id={row.id} disabled={disabled} /> : undefined,
+   }
+   return <ExtensionDetailPane detail={detail} showBackLink={showBackLink} onClose={onClose} />
+ }
+diff --git a/frontend/src/views/ExtensionsInstalledPlugins.tsx b/frontend/src/views/ExtensionsInstalledPlugins.tsx
+deleted file mode 100644
+index e5a621d2914ba0bfceb9eca568e9cbfa846681af..0000000000000000000000000000000000000000
+--- a/frontend/src/views/ExtensionsInstalledPlugins.tsx
++++ /dev/null
+@@ -1,291 +0,0 @@
+-import { useState } from 'react'
+-import { useTranslation } from 'react-i18next'
+-import { Button, Label, Pagination, Stack, Text } from '@primer/react'
+-import { AlertIcon, PlugIcon } from '@primer/octicons-react'
+-import { PluginService } from '../../bindings/github.com/alicoding/mill/internal/services/pluginsvc'
+-import type { PluginInfo } from '../../bindings/github.com/alicoding/mill/internal/services/pluginsvc/models'
+-import { SettingsService } from '../shared/bindings'
+-import { pluginLoadStates, pluginsAwaitingReview } from '../plugins/loader'
+-import { ExamplesSection } from '../shared/ExamplesSection'
+-import { ExtensionRow } from './ExtensionRow'
+-import { ExtensionsLinkPasteControl } from './ExtensionsLinkPasteControl'
+-import { ExtensionsTrustBar } from './ExtensionsTrustBar'
+-import { ExtensionRowMenu } from './ExtensionRowMenu'
+-import { ExtensionsKindChips } from './ExtensionsKindChips'
+-import { hasCanvasHostGrant, tierLabelKey, tierVariant } from './extensionTrust'
+-import { refreshDisabledExtensions, useExtensionEnablementStore } from '../shared/extensionEnablementStore'
+-import { LIST_PAGE_SIZE, clampPage, listCountLabel, pageCountFor, pageItems } from '../shared/listStandard'
+-import { useListState } from '../shared/useListState'
+-import { ListToolbar } from '../shared/ListToolbar'
+-import { groupOrder, type InventoryItemGroup } from '../shared/inventoryItem'
+-import listStyles from '../shared/ListCard.module.css'
+-import styles from './ExtensionsSection.module.css'
+-import { background } from '../shared/background'
+-
+-// The Installed half of Settings > Extensions (goal 0321, re-shaped
+-// goal 0249's section, put on the one list standard by goal 0337 S2):
+-// every folder in the plugins directory as ONE row apiece, in the SAME
+-// row component the built-in tools list uses -- the two lists used to
+-// be differently-shaped blocks on one page, which is what made the
+-// section read as two features rather than one inventory. What each
+-// plugin contributes, what it can reach, and why it is not running now
+-// live in the detail pane a row opens.
+-//
+-// PluginInfo.Builtin (pluginservice_builtin.go) splits this SAME
+-// PluginService.ListPlugins() response into two groups the standard
+-// already has a shape for: a plugin the user installed is an "own"
+-// item, one embedded in the binary (mill-drawing) is an "example" --
+-// the standard's own Built-in disclosure section, never paginated, no
+-// sort menu since a manifest carries no timestamp to sort by.
+-//
+-// The install story stays here, beside the list it explains: the
+-// folder is one click away, and a fresh install takes effect on
+-// reload (plugins load at app start).
+-
+-// A plugin the user cannot simply switch on from the row -- policy or
+-// a pending review answers first, in the detail pane.
+-function rowControl(status: string | undefined, error: string | undefined): 'switch' | 'none' {
+-  if (error) return 'none'
+-  if (status === 'policy' || status === 'blocked' || status === 'unallowed' || status === 'changed' || status === 'unsigned') return 'none'
+-  return 'switch'
+-}
+-
+-// needsReview mirrors plugins/loader.ts's own pluginsAwaitingReview
+-// state set ('unallowed' folds in 'widened', pluginTrust.ts's own
+-// fold) -- the row pill, the pinned group and the shared count can
+-// never disagree about which rows these are (goal 0420).
+-function needsReview(status: string | undefined): boolean {
+-  return status === 'unallowed' || status === 'changed'
+-}
+-
+-// The pinned group groupOrder ranks first (goal 0420): this view keeps
+-// its own bespoke ExtensionRow rendering (never InventoryList's), but
+-// the GROUPING is the same shared/inventoryItem.ts primitive Secrets'
+-// merged list already orders by -- never a hand-rolled reimplementation
+-// of what that primitive already does. Its icon is never rendered here
+-// (no InventoryList group header uses it); attention colors so a
+-// future InventoryList-rendered consumer inherits the right cue.
+-const NEEDS_REVIEW_GROUP_ICON = { Icon: AlertIcon, bg: 'var(--bgColor-attention-muted)', fg: 'var(--fgColor-attention)' }
+-function needsReviewGroup(label: string): InventoryItemGroup {
+-  return { key: 'needs-review', label, icon: NEEDS_REVIEW_GROUP_ICON, pinned: true }
+-}
+-
+-export function ExtensionsInstalledPlugins({ plugins, allowedIds, selectedId, onSelect }: {
+-  plugins: PluginInfo[] | null
+-  allowedIds: string[]
+-  selectedId: string | null
+-  onSelect: (id: string) => void
+-}) {
+-  const { t } = useTranslation('views')
+-  const { t: tc } = useTranslation('common')
+-  const disabledIds = useExtensionEnablementStore((s) => s.disabledExtensionIds)
+-  const states = pluginLoadStates()
+-  const [query, setQuery] = useState('')
+-  const [kinds, setKinds] = useState<string[]>([])
+-  const { state, setPage, resetPage, setExamplesExpanded } = useListState('extensions-installed')
+-
+-  const toggle = (id: string, enabled: boolean) => {
+-    void background(SettingsService.SetExtensionEnabled(id, enabled).then(refreshDisabledExtensions), 'extensionsInstalledPlugins.setExtensionEnabled')
+-  }
+-  const openFolder = () => {
+-    void background(PluginService.RevealPluginsDir(), 'extensionsInstalledPlugins.revealPluginsDir')
+-  }
+-
+-  const own = (plugins ?? []).filter((p) => !p.Builtin)
+-  const builtIns = (plugins ?? []).filter((p) => p.Builtin)
+-  const q = query.trim().toLowerCase()
+-  const contributedKinds = (p: PluginInfo): string[] =>
+-    Object.entries((p.Manifest.contributes ?? {}) as unknown as Record<string, unknown>)
+-      .filter(([, value]) => Array.isArray(value) && value.length > 0)
+-      .map(([key]) => key)
+-  const matches = (p: PluginInfo) => {
+-    const text = q === '' || (p.Manifest.name || p.Manifest.id).toLowerCase().includes(q) || (p.Manifest.description ?? '').toLowerCase().includes(q)
+-    const kind = kinds.length === 0 || kinds.some((k) => contributedKinds(p).includes(k))
+-    return text && kind
+-  }
+-  const reviewCount = pluginsAwaitingReview()
+-  const effectiveStatus = (plugin: PluginInfo): string | undefined => {
+-    const runtime = states.get(plugin.Manifest.id)?.status
+-    if (runtime) return runtime
+-    if (!plugin.Builtin && (plugin.ApprovalState === 'unallowed' || plugin.ApprovalState === 'changed')) return plugin.ApprovalState
+-    if (!plugin.Builtin && plugin.ApprovalState !== 'allowed') return 'error'
+-    if (plugin.ThemeImport && !allowedIds.includes(plugin.Manifest.id)) return 'unallowed'
+-    return undefined
+-  }
+-  const visibleReviewCount = own.filter((plugin) => needsReview(effectiveStatus(plugin))).length
+-  const totalReviewCount = Math.max(reviewCount, visibleReviewCount)
+-  const reviewGroup = needsReviewGroup(t('settings.extensions.needsReviewGroup', { count: totalReviewCount }))
+-  // The "Needs review" group is pinned first (goal 0420, Decision 2) --
+-  // groupOrder's own pinned-group ordering, ahead of pagination, so the
+-  // group -- and its header -- lands on page 1 rather than wherever a
+-  // plugin's scan order happened to put it.
+-  const ownFiltered = groupOrder(
+-    own.filter(matches).map((plugin) => ({
+-      plugin,
+-      group: needsReview(effectiveStatus(plugin)) ? reviewGroup : undefined,
+-    })),
+-  ).map((g) => g.plugin)
+-  const builtInFiltered = builtIns.filter(matches)
+-
+-  const pageCount = pageCountFor(ownFiltered.length)
+-  const page = clampPage(state.page, pageCount)
+-  const ownPage = pageItems(ownFiltered, page)
+-  const reviewPage = ownPage.filter((p) => needsReview(effectiveStatus(p)))
+-  const restPage = ownPage.filter((p) => !needsReview(effectiveStatus(p)))
+-  const firstOnPage = (page - 1) * LIST_PAGE_SIZE + 1
+-  // The count is the user's OWN plugins -- the Built-in section carries
+-  // its own number in its own heading (goal 0337).
+-  const count = own.length === 0 ? undefined : listCountLabel({
+-    total: own.length,
+-    shown: ownFiltered.length,
+-    ...(pageCount > 1 ? { from: firstOnPage, to: firstOnPage + ownPage.length - 1 } : {}),
+-  })
+-
+-  // Collapsed once the user has installed anything, expanded on a
+-  // fresh install where the built-ins are all there is to see -- and
+-  // always expanded while a live query matches one, so a search can
+-  // never appear to have found nothing.
+-  const expanded = state.examplesExpanded ?? own.length === 0
+-  const showBuiltIns = expanded || (q !== '' && builtInFiltered.length > 0)
+-
+-  const changeQuery = (next: string) => {
+-    setQuery(next)
+-    resetPage()
+-  }
+-
+-  const rowFor = (p: PluginInfo) => {
+-    const id = p.Manifest.id
+-    const name = p.Manifest.name || id
+-    const runtime = states.get(id)
+-    const status = effectiveStatus(p)
+-    const error = p.Error || (runtime?.status === 'error' ? runtime.error : '') || (status === 'error' ? t('settings.extensions.reloadRefusal.unavailable') : '')
+-    const badgeKey = tierLabelKey(p.Tier ?? '')
+-    const policyBlocked = status === 'policy'
+-    const canvasHost = hasCanvasHostGrant(p)
+-    const waitsFor = runtime?.status === 'waits' ? runtime.waitsFor : undefined
+-    // A blocked row's trailing cluster is already the widest the list
+-    // carries (the policy label replaces the toggle); repeating the
+-    // author and version alongside it overflows onto the name in the
+-    // narrow split view. The detail pane and the Verification tab carry
+-    // the full identity, so the row keeps name, tier and policy state.
+-    const showOrigin = !policyBlocked
+-    return (
+-      <li key={id} data-testid="extensions-plugin-row" data-plugin-id={id}>
+-        <ExtensionRow
+-          id={id}
+-          icon={PlugIcon}
+-          name={name}
+-          description={p.Manifest.description}
+-          meta={(
+-            <>
+-              {showOrigin && p.Manifest.author && <Text size="small" className={listStyles.muted}>{p.Manifest.author}</Text>}
+-              {showOrigin && p.Manifest.version && <Text size="small" className={listStyles.muted}>{t('extensions.versionLabel', { version: p.Manifest.version })}</Text>}
+-              {badgeKey && <Label variant={tierVariant(p.Tier ?? '')} data-testid="extensions-row-tier">{t(badgeKey)}</Label>}
+-              {canvasHost && <Label data-testid="extensions-row-canvas-host">{t('settings.extensions.canvasHostLabel')}</Label>}
+-              {policyBlocked && (
+-                <Label variant="attention" data-testid="extensions-row-policy">{t('extensions.policy.blockedStatus')}</Label>
+-              )}
+-              {waitsFor && <Label data-testid="extensions-row-waits">{t('settings.extensions.pluginWaitsLabel', { id: waitsFor })}</Label>}
+-              {needsReview(status) && <Label variant="attention" data-testid="extensions-row-needs-review">{t('settings.extensions.needsReviewPill')}</Label>}
+-            </>
+-          )}
+-          actions={p.Builtin ? undefined : <ExtensionRowMenu id={id} name={name} />}
+-          control={rowControl(status, error)}
+-          enabled={!disabledIds.includes(id)}
+-          selected={selectedId === id}
+-          builtInLabel={t('settings.extensions.pluginBuiltIn')}
+-          toggleTestId="extensions-plugin-toggle"
+-          onSelect={() => onSelect(id)}
+-          onToggle={(enabled) => toggle(id, enabled)}
+-        />
+-      </li>
+-    )
+-  }
+-
+-  return (
+-    <Stack direction="vertical" gap="condensed" data-testid="extensions-installed-plugins">
+-      <Stack direction="horizontal" justify="space-between" align="center" gap="condensed">
+-        <Text as="h3" size="small" weight="semibold" className={listStyles.muted}>
+-          {t('settings.extensions.installedTitle')}
+-        </Text>
+-        <Stack direction="horizontal" gap="condensed">
+-          <Button size="small" onClick={openFolder} data-testid="extensions-open-plugins-folder">
+-            {t('settings.extensions.openPluginsFolder')}
+-          </Button>
+-          <Button size="small" onClick={() => window.location.reload()} data-testid="extensions-reload">
+-            {t('settings.extensions.reload')}
+-          </Button>
+-        </Stack>
+-      </Stack>
+-      <Text as="p" size="small" className={listStyles.muted}>
+-        {t('settings.extensions.installHint')}
+-      </Text>
+-      <ExtensionsTrustBar />
+-      {plugins !== null && <ExtensionsLinkPasteControl plugins={plugins} disabledIds={disabledIds} />}
+-      {plugins !== null && plugins.length === 0 && (
+-        <Text size="small" className={listStyles.muted} data-testid="extensions-no-plugins">
+-          {t('settings.extensions.noPlugins')}
+-        </Text>
+-      )}
+-      {plugins !== null && plugins.length > 0 && (
+-        <>
+-          <ListToolbar
+-            query={query}
+-            onQueryChange={changeQuery}
+-            searchAriaLabel={t('settings.extensions.installedTitle')}
+-            count={count}
+-          />
+-          <ExtensionsKindChips selected={kinds} onChange={(next) => { setKinds(next); resetPage() }} />
+-          {ownFiltered.length === 0 && builtInFiltered.length === 0 ? (
+-            <Text as="p" size="small" className={listStyles.muted}>{tc('inventoryList.noMatchesFor', { query })}</Text>
+-          ) : (
+-            <>
+-              {reviewPage.length > 0 && (
+-                <Stack direction="vertical" gap="none" data-testid="extensions-needs-review-group">
+-                  <Text as="h4" size="small" className={listStyles.muted}>
+-                    {t('settings.extensions.needsReviewGroup', { count: totalReviewCount })}
+-                  </Text>
+-                  <ul className={styles.rows} aria-label={t('settings.extensions.needsReviewGroup', { count: totalReviewCount })}>
+-                    {reviewPage.map(rowFor)}
+-                  </ul>
+-                </Stack>
+-              )}
+-              {restPage.length > 0 && (
+-                <ul className={styles.rows} aria-label={t('settings.extensions.installedTitle')}>
+-                  {restPage.map(rowFor)}
+-                </ul>
+-              )}
+-              {pageCount > 1 && (
+-                <Pagination
+-                  pageCount={pageCount}
+-                  currentPage={page}
+-                  showPages
+-                  onPageChange={(e, n) => {
+-                    // Primer's page controls are anchors with a default
+-                    // '#' href -- without this the click also navigates.
+-                    e.preventDefault()
+-                    setPage(n)
+-                  }}
+-                />
+-              )}
+-              <ExamplesSection
+-                count={builtInFiltered.length}
+-                expanded={showBuiltIns}
+-                onToggle={setExamplesExpanded}
+-                heading={t('settings.extensions.builtInCount', { count: builtInFiltered.length })}
+-                showLabel={t('settings.extensions.showBuiltIn')}
+-                hideLabel={t('settings.extensions.hideBuiltIn')}
+-                testId="extensions-built-in-plugins"
+-                toggleTestId="extensions-built-in-toggle"
+-              >
+-                <ul className={styles.rows} aria-label={t('settings.extensions.builtInCount', { count: builtInFiltered.length })}>
+-                  {builtInFiltered.map(rowFor)}
+-                </ul>
+-              </ExamplesSection>
+-            </>
+-          )}
+-        </>
+-      )}
+-    </Stack>
+-  )
+-}
+diff --git a/frontend/src/views/ExtensionsInventory.tsx b/frontend/src/views/ExtensionsInventory.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..6d4918de22ae32ef837b84f6c432c36d4a99d97c
+--- /dev/null
++++ b/frontend/src/views/ExtensionsInventory.tsx
+@@ -0,0 +1,134 @@
++import { ActionList, Button, Label, Text } from '@primer/react'
++import { ChevronDownIcon, ChevronRightIcon, PlugIcon } from '@primer/octicons-react'
++import { useTranslation } from 'react-i18next'
++import type { PluginInfo } from '../../bindings/github.com/alicoding/mill/internal/services/pluginsvc/models'
++import { pluginLoadStates } from '../plugins/loader'
++import type { ExtensionRowSource } from './extensionMeta'
++import { descriptionLabel } from './extensionMeta'
++import { ExtensionRow } from './ExtensionRow'
++import { tierLabelKey, tierVariant } from './extensionTrust'
++import { matchesExtension, pluginEffectiveStatus, pluginNeedsReview, pluginRowStatus, type ExtensionRowStatus } from './extensionInventory'
++import listStyles from '../shared/ListCard.module.css'
++
++export type ExtensionSelection = { kind: 'builtin' | 'plugin'; id: string } | null
++
++export function ExtensionsInventory({
++  query,
++  pending,
++  installed,
++  builtInRows,
++  builtInPlugins,
++  builtInCount,
++  builtInsExpanded,
++  allowedIds,
++  disabledIds,
++  selection,
++  onBuiltInsExpandedChange,
++  onSelect,
++}: {
++  query: string
++  pending: PluginInfo[]
++  installed: PluginInfo[]
++  builtInRows: ExtensionRowSource[]
++  builtInPlugins: PluginInfo[]
++  builtInCount: number
++  builtInsExpanded: boolean
++  allowedIds: string[]
++  disabledIds: string[]
++  selection: ExtensionSelection
++  onBuiltInsExpandedChange: (expanded: boolean) => void
++  onSelect: (selection: NonNullable<ExtensionSelection>) => void
++}) {
++  const { t } = useTranslation('views')
++  const runtimeStates = pluginLoadStates()
++  const filteredPending = pending.filter((plugin) => matchesExtension(query, plugin.Manifest.name || plugin.Manifest.id, plugin.Manifest.description))
++  const filteredInstalled = installed.filter((plugin) => matchesExtension(query, plugin.Manifest.name || plugin.Manifest.id, plugin.Manifest.description))
++  const filteredBuiltInRows = builtInRows.filter((row) => matchesExtension(query, row.label, descriptionLabel(row)))
++  const filteredBuiltInPlugins = builtInPlugins.filter((plugin) => matchesExtension(query, plugin.Manifest.name || plugin.Manifest.id, plugin.Manifest.description))
++  const filteredBuiltInCount = filteredBuiltInRows.length + filteredBuiltInPlugins.length
++  const expanded = query.trim() !== '' ? filteredBuiltInCount > 0 : builtInsExpanded
++  const noMatches = filteredPending.length === 0 && filteredInstalled.length === 0 && filteredBuiltInCount === 0
++
++  if (noMatches) {
++    return <Text as="p" size="small" className={listStyles.muted} data-testid="extensions-no-matches">{t('settings.extensions.noMatches', { query })}</Text>
++  }
++
++  return (
++    <ActionList role="listbox" selectionVariant="single" aria-label={t('settings.extensions.inventoryAria')} data-testid="extensions-action-list">
++      {filteredPending.length > 0 && (
++        <ActionList.Group data-testid="extensions-needs-review-group">
++          <ActionList.GroupHeading>{t('settings.extensions.needsReviewGroup', { count: pending.length })}</ActionList.GroupHeading>
++          {filteredPending.map((plugin) => renderPluginRow(plugin, true))}
++        </ActionList.Group>
++      )}
++      {filteredInstalled.length > 0 && (
++        <ActionList.Group data-testid="extensions-installed-group">
++          <ActionList.GroupHeading>{t('settings.extensions.installedTitle')}</ActionList.GroupHeading>
++          {filteredInstalled.map((plugin) => renderPluginRow(plugin, false))}
++        </ActionList.Group>
++      )}
++      {filteredBuiltInCount > 0 && (
++        <ActionList.Group data-testid="extensions-built-in-group">
++          <ActionList.GroupHeading>
++            <Button
++              variant="invisible"
++              size="small"
++              leadingVisual={expanded ? ChevronDownIcon : ChevronRightIcon}
++              aria-expanded={expanded}
++              onClick={() => onBuiltInsExpandedChange(!expanded)}
++              data-testid="extensions-built-in-toggle"
++            >
++              {t('settings.extensions.builtInCount', { count: query.trim() === '' ? builtInCount : filteredBuiltInCount })}
++            </Button>
++          </ActionList.GroupHeading>
++          {expanded && filteredBuiltInRows.map((row) => (
++            <ExtensionRow
++              key={`builtin:${row.id}`}
++              id={row.id}
++              icon={row.icon}
++              name={row.label}
++              description={descriptionLabel(row)}
++              selected={selection?.kind === 'builtin' && selection.id === row.id}
++              status={<Label data-testid="extensions-row-status">{disabledIds.includes(row.id) ? t('settings.extensions.statusOff') : t('settings.extensions.builtIn')}</Label>}
++              onSelect={() => onSelect({ kind: 'builtin', id: row.id })}
++            />
++          ))}
++          {expanded && filteredBuiltInPlugins.map((plugin) => renderPluginRow(plugin, false))}
++        </ActionList.Group>
++      )}
++    </ActionList>
++  )
++
++  function renderPluginRow(plugin: PluginInfo, review: boolean) {
++    const id = plugin.Manifest.id
++    const runtime = runtimeStates.get(id)
++    const effective = pluginEffectiveStatus(plugin, runtime, allowedIds)
++    const displayStatus = review ? effective : (pluginNeedsReview(effective) ? undefined : effective)
++    const status = pluginRowStatus({ plugin, runtime, status: displayStatus, disabled: disabledIds.includes(id) })
++    return (
++      <ExtensionRow
++        key={`plugin:${id}`}
++        id={id}
++        icon={PlugIcon}
++        name={plugin.Manifest.name || id}
++        description={plugin.Manifest.description}
++        selected={selection?.kind === 'plugin' && selection.id === id}
++        status={review ? undefined : <PluginStatus status={status} />}
++        reviewLabel={review ? t('settings.extensions.awaitingReviewAction') : undefined}
++        plugin
++        onSelect={() => onSelect({ kind: 'plugin', id })}
++      />
++    )
++  }
++
++  function PluginStatus({ status }: { status: ExtensionRowStatus }) {
++    if (status.kind === 'review') return <Label variant="attention" data-testid="extensions-row-status">{t('settings.extensions.needsReviewPill')}</Label>
++    if (status.kind === 'blocked') return <Label variant="attention" data-testid="extensions-row-status">{t('settings.extensions.statusBlocked')}</Label>
++    if (status.kind === 'error') return <Label variant="danger" data-testid="extensions-row-status">{t('settings.extensions.statusUnavailable')}</Label>
++    if (status.kind === 'waits') return <Label data-testid="extensions-row-status">{t('settings.extensions.pluginWaitsLabel', { id: status.value ?? '' })}</Label>
++    if (status.kind === 'disabled') return <Label data-testid="extensions-row-status">{t('settings.extensions.statusOff')}</Label>
++    if (status.value === 'built-in') return <Label data-testid="extensions-row-status">{t('settings.extensions.pluginBuiltIn')}</Label>
++    const key = tierLabelKey(status.value ?? '')
++    return key ? <Label variant={tierVariant(status.value ?? '')} data-testid="extensions-row-status">{t(key)}</Label> : null
++  }
++}
+diff --git a/frontend/src/views/ExtensionsPluginDetail.tsx b/frontend/src/views/ExtensionsPluginDetail.tsx
+index 19e97041e767c7db6c436130a6d3eb4aeafa1fd7..c673bf951adfaeba8eeded180641dc411d87f157 100644
+--- a/frontend/src/views/ExtensionsPluginDetail.tsx
++++ b/frontend/src/views/ExtensionsPluginDetail.tsx
+@@ -20,6 +20,8 @@ import { ExtensionsMCPServers } from './ExtensionsMCPServers'
+ import { ThemeImportEvidence } from './ThemeImportEvidence'
+ import { missingExampleWarnings, reachLabel } from './extensionMeta'
+ import listStyles from '../shared/ListCard.module.css'
++import { ExtensionEnableButton } from './ExtensionEnableButton'
++import { useExtensionEnablementStore } from '../shared/extensionEnablementStore'
+ 
+ // The detail pane for an INSTALLED plugin (goal 0321): the same
+ // adapter job ExtensionsBuiltInDetail does, over the manifest and the
+@@ -41,6 +43,7 @@ export default function ExtensionsPluginDetail({ plugin, allowed, onAllow, showB
+   const { t } = useTranslation('views')
+   const [tab, setTab] = useState<ExtensionDetailTab>('overview')
+ 	const id = plugin.Manifest.id
++	const disabled = useExtensionEnablementStore((state) => state.disabledExtensionIds.includes(id))
+ 	const name = plugin.Manifest.name || id
+ 	const runtime = pluginLoadStates().get(id)
+ 	const status = pluginStatus(plugin, allowed, runtime)
+@@ -84,7 +87,12 @@ export default function ExtensionsPluginDetail({ plugin, allowed, onAllow, showB
+         warnings={[...(plugin.Warnings ?? []), ...missingExampleWarnings(contributes?.canvasObjects)]}
+       />
+     ),
+-		actions: reloadAction(id, name, t),
++		actions: (
++			<Stack direction="horizontal" gap="condensed">
++				<ExtensionEnableButton id={id} disabled={disabled} />
++				{reloadAction(id, name, t)}
++			</Stack>
++		),
+ 		onRemove: removeAction(id),
+   }
+   // A built-in has nothing installed to verify and no folder to read a
+diff --git a/frontend/src/views/ExtensionsSection.module.css b/frontend/src/views/ExtensionsSection.module.css
+index d4cf990bc5eef2ece4bd7985b300abfa4a6de40e..40af3e81f2bd2e25441c75b417876faa1e7359b8 100644
+--- a/frontend/src/views/ExtensionsSection.module.css
++++ b/frontend/src/views/ExtensionsSection.module.css
+@@ -1,17 +1,25 @@
+-/* Settings > Extensions (goal 0321): a list beside a detail pane.
+-   Below the two-pane breakpoint the caller renders the detail INSTEAD
+-   of the list, so this grid only ever exists at the wide layout. */
++/* The desktop shape stays put while selection changes: a narrow
++   inventory rail and a flexible detail pane. Narrow layouts never use
++   this grid; detail replaces the list there. */
+ .split {
+     display: grid;
+-    /* The detail column is wider than the original 320px since goal
+-       0349 gave an installed extension five tabs: at 320 the tab strip
+-       widened the grid track and shoved the pane's own content out
+-       from under its border. */
+-    grid-template-columns: minmax(0, 1fr) minmax(0, 420px);
++    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+     gap: var(--s-4);
+     align-items: start;
+ }
+ 
++.inventoryRail {
++    min-width: 0;
++}
++
++.inventoryToolbar {
++    min-width: 0;
++}
++
++.inventoryToolbar > :first-child {
++    flex: 1;
++}
++
+ /* One group's rows. A plain semantic list rather than Primer's
+    ActionList: the row's own height is the point of this surface (it
+    follows display density directly, extensionMeta.ts's
+diff --git a/frontend/src/views/ExtensionsSection.tsx b/frontend/src/views/ExtensionsSection.tsx
+index a42e2e017638f0edf4226024c6579032abaf9666..7c488e033fd23f2b339f2fb5cd73a421fe73e6d0 100644
+--- a/frontend/src/views/ExtensionsSection.tsx
++++ b/frontend/src/views/ExtensionsSection.tsx
+@@ -1,241 +1,277 @@
+-import { useCallback, useEffect, useState } from 'react'
+-import { useTranslation } from 'react-i18next'
+-import { Button, Link, Stack, Text } from '@primer/react'
+-import { ATLAS_TOOLS, type AtlasToolID } from '../atlas/atlasTools'
+-import { isThirdPartyToolId, toolLessNounExtensions } from '../atlas/atlasNounRegistry'
+-import { PluginService } from '../../bindings/github.com/alicoding/mill/internal/services/pluginsvc'
+-import type { PluginInfo } from '../../bindings/github.com/alicoding/mill/internal/services/pluginsvc/models'
+-import { SettingsService } from '../shared/bindings'
+-import { refreshDisabledExtensions, useExtensionEnablementStore } from '../shared/extensionEnablementStore'
+-import { usePluginRemoveVersion } from '../shared/pluginRemoveSignal'
+-import { usePluginReloadVersion } from '../plugins/pluginReloadSignal'
+-import { useHasSidePane } from '../shared/useNarrowViewport'
+-import { useAppStore } from '../shared/store'
+-import { useUISignalStore } from '../shared/uiSignalStore'
+-import { ExtensionRow } from './ExtensionRow'
+-import { ExtensionsInstalledPlugins } from './ExtensionsInstalledPlugins'
+-import ExtensionsBuiltInDetail from './ExtensionsBuiltInDetail'
+-import ExtensionsPluginDetail from './ExtensionsPluginDetail'
+-import { lazyArray } from '../shared/lazySnapshot'
+-import { descriptionLabel, groupSectionLabel, toolLessRowSource, toolRowSource, type ExtensionRowSource } from './extensionMeta'
+-import type { AtlasNounGroup } from '../atlas/atlasNounRegistry'
+-import listStyles from '../shared/ListCard.module.css'
+-import styles from './ExtensionsSection.module.css'
+-import { background } from '../shared/background'
+-import { useExtensionRecoveryStore } from '../shared/extensionRecoveryStore'
+-
+-// Every canvas tool is an Atlas object -- ONE docs link for the whole
+-// page, never a per-row URL guess.
+-const ATLAS_CONCEPTS_DOCS_PAGE = 'concepts/atlas.md'
+-
+-// Settings > Extensions (goal 0237 S2/S3, re-shaped by goal 0321): one
+-// LIST of every extension, built-in and installed alike, beside a
+-// DETAIL pane. A row is identity only; everything else -- what it
+-// adds, what it can reach, its declared settings, its docs link --
+-// reads in the pane. The rows are registry-DERIVED: a new tray tool's
+-// registerNoun() call or a new tool-less noun's own `extension`
+-// declaration makes it appear here with zero edits to this file.
+-//
+-// `card` is the one exception: it's the kernel knowledge object
+-// (ADR-0046), not a guest extension, so its row renders a "Built-in"
+-// label instead of a toggle -- shown rather than omitted, so the list
+-// still reads as a complete inventory of every canvas noun.
+-//
+-// Disabling a TRAY tool only changes what CAN be created from now on:
+-// it removes the tool's button from the creation tray and its
+-// `atlas.create.<id>` command from the palette/keyboard -- existing
+-// board objects of that kind keep rendering exactly as before.
+-const CARD_TOOL_ID: AtlasToolID = 'card'
++import { useCallback, useEffect, useMemo, useState } from "react";
++import { useTranslation } from "react-i18next";
++import { Stack } from "@primer/react";
++
++import { Blankslate } from "@primer/react/experimental";
++
++import { ATLAS_TOOLS, type AtlasToolID } from "../atlas/atlasTools";
++import {
++  isThirdPartyToolId,
++  toolLessNounExtensions,
++} from "../atlas/atlasNounRegistry";
++import { PluginService } from "../../bindings/github.com/alicoding/mill/internal/services/pluginsvc";
++import type { PluginInfo } from "../../bindings/github.com/alicoding/mill/internal/services/pluginsvc/models";
++import { SettingsService } from "../shared/bindings";
++import {
++  refreshDisabledExtensions,
++  useExtensionEnablementStore,
++} from "../shared/extensionEnablementStore";
++import { usePluginRemoveVersion } from "../shared/pluginRemoveSignal";
++import { usePluginReloadVersion } from "../plugins/pluginReloadSignal";
++import { pluginLoadStates, pluginsAwaitingReviewIds } from "../plugins/loader";
++import { useHasSidePane } from "../shared/useNarrowViewport";
++import { useUISignalStore } from "../shared/uiSignalStore";
++
++import ExtensionsBuiltInDetail from "./ExtensionsBuiltInDetail";
++import ExtensionsPluginDetail from "./ExtensionsPluginDetail";
++import { lazyArray } from "../shared/lazySnapshot";
++import { toolLessRowSource, toolRowSource, type ExtensionRowSource } from "./extensionMeta";
++import { background } from "../shared/background";
++import { useExtensionRecoveryStore } from "../shared/extensionRecoveryStore";
++
++import type { CommandContext } from "../shared/commandContext";
++import { ListToolbar } from "../shared/ListToolbar";
++import { listCountLabel } from "../shared/listStandard";
++
++import { pluginEffectiveStatus, pluginNeedsReview } from "./extensionInventory";
++import { ExtensionsInventory, type ExtensionSelection } from "./ExtensionsInventory";
++import { ExtensionCollectionMenu } from "./ExtensionCollectionMenu";
++
++import styles from "./ExtensionsSection.module.css";
++
++const CARD_TOOL_ID: AtlasToolID = "card";
+ const EXTENSION_ROWS: ExtensionRowSource[] = lazyArray(() => [
+-  // Runtime plugin tools are excluded here -- they get their own row
+-  // in the Installed list below, from their manifest, never a second
+-  // compiled-in-style one.
+-  ...ATLAS_TOOLS.filter((tool) => !(tool as { thirdParty?: boolean }).thirdParty).map(toolRowSource),
+-  ...toolLessNounExtensions().filter((n) => !isThirdPartyToolId(n.kind)).map(toolLessRowSource),
+-])
+-const NON_BUILT_IN_IDS: string[] = lazyArray(() => EXTENSION_ROWS.filter((r) => r.id !== CARD_TOOL_ID).map((r) => r.id))
+-
+-// The built-in list's own sub-headings, in the same
+-// objects-then-media-then-annotate order the creation dock renders
+-// (goal 0355). Rows within each keep EXTENSION_ROWS' registry order.
+-const SECTION_ORDER: AtlasNounGroup[] = ['objects', 'media', 'annotate', 'embed']
+-
+-type Selection = { kind: 'builtin' | 'plugin'; id: string } | null
+-
+-export default function ExtensionsSection() {
+-  const { t } = useTranslation('views')
+-  const disabledIds = useExtensionEnablementStore((s) => s.disabledExtensionIds)
+-  const hasSidePane = useHasSidePane()
+-  const [appVersion, setAppVersion] = useState('')
+-  const [plugins, setPlugins] = useState<PluginInfo[] | null>(null)
+-  const [allowedNow, setAllowedNow] = useState<string[]>([])
+-  const [selection, setSelection] = useState<Selection>(null)
+-  // A reload re-registers contributions; a removal takes a folder off
+-  // disk. Either invalidates what this list is showing.
+-  usePluginReloadVersion()
+-  const removeVersion = usePluginRemoveVersion()
++  ...ATLAS_TOOLS.filter(
++    (tool) => !(tool as { thirdParty?: boolean }).thirdParty,
++  ).map(toolRowSource),
++  ...toolLessNounExtensions()
++    .filter((noun) => !isThirdPartyToolId(noun.kind))
++    .map(toolLessRowSource),
++]);
++const NON_BUILT_IN_IDS: string[] = lazyArray(() =>
++  EXTENSION_ROWS.filter((row) => row.id !== CARD_TOOL_ID).map((row) => row.id),
++);
++export default function ExtensionsSection({
++  onReviewCountChange,
++}: {
++  onReviewCountChange?: (count: number) => void;
++}) {
++  const { t } = useTranslation("views");
++  const disabledIds = useExtensionEnablementStore(
++    (state) => state.disabledExtensionIds,
++  );
++  const hasSidePane = useHasSidePane();
++  const [appVersion, setAppVersion] = useState("");
++  const [plugins, setPlugins] = useState<PluginInfo[] | null>(null);
++  const [allowedNow, setAllowedNow] = useState<string[]>([]);
++  const [selection, setSelection] = useState<ExtensionSelection>(null);
++  const [query, setQuery] = useState("");
++  const [builtInsExpanded, setBuiltInsExpanded] = useState<boolean | null>(
++    null,
++  );
++  usePluginReloadVersion();
++  const removeVersion = usePluginRemoveVersion();
+ 
+   useEffect(() => {
+-    void refreshDisabledExtensions()
+-    void background(SettingsService.AppVersion().then(setAppVersion), 'extensions.appVersion')
+-  }, [])
++    void refreshDisabledExtensions();
++    void background(
++      SettingsService.AppVersion().then(setAppVersion),
++      "extensions.appVersion",
++    );
++  }, []);
+ 
+   useEffect(() => {
+-    PluginService.ListPlugins().then((result) => {
+-      const scanned = result ?? []
+-      setPlugins(scanned)
+-      setAllowedNow(scanned.filter((plugin) => plugin.ApprovalState === 'allowed').map((plugin) => plugin.Manifest.id))
+-    }).catch((error) => {
+-      useExtensionRecoveryStore.getState().observe(error)
+-      setPlugins([])
+-      setAllowedNow([])
+-    })
+-  }, [removeVersion])
+-
+-  // A removed plugin's detail pane has nothing left to show.
++    PluginService.ListPlugins()
++      .then((result) => {
++        const scanned = result ?? [];
++        setPlugins(scanned);
++        setAllowedNow(
++          scanned
++            .filter((plugin) => plugin.ApprovalState === "allowed")
++            .map((plugin) => plugin.Manifest.id),
++        );
++      })
++      .catch((error) => {
++        useExtensionRecoveryStore.getState().observe(error);
++        setPlugins([]);
++        setAllowedNow([]);
++      });
++  }, [removeVersion]);
++
+   useEffect(() => {
+-    if (selection?.kind !== 'plugin' || plugins === null) return
+-    if (!plugins.some((p) => p.Manifest.id === selection.id)) setSelection(null)
+-  }, [plugins, selection])
+-
+-  // extensions.review's single-plugin deep link (goal 0420): set-then-
+-  // consume, the same shape extensionUpdateRequest already uses --
+-  // this component may mount FRESH on the same navigation that raises
+-  // the signal.
+-  const pluginReviewRequest = useUISignalStore((s) => s.extensionReviewRequest)
+-  const consumeExtensionReview = useUISignalStore((s) => s.consumeExtensionReview)
++    if (selection?.kind !== "plugin" || plugins === null) return;
++    if (!plugins.some((plugin) => plugin.Manifest.id === selection.id))
++      setSelection(null);
++  }, [plugins, selection]);
++
++  const pluginReviewRequest = useUISignalStore(
++    (state) => state.extensionReviewRequest,
++  );
++  const consumeExtensionReview = useUISignalStore(
++    (state) => state.consumeExtensionReview,
++  );
+   useEffect(() => {
+-    if (!pluginReviewRequest) return
+-    setSelection({ kind: 'plugin', id: pluginReviewRequest })
+-    consumeExtensionReview()
+-  }, [pluginReviewRequest, consumeExtensionReview])
+-
+-  const toggle = (id: string, enabled: boolean) => {
+-    void background(SettingsService.SetExtensionEnabled(id, enabled).then(refreshDisabledExtensions), 'extensions.setExtensionEnabled')
+-  }
+-
+-  // Escape closes the pane and focus returns to the row that opened
+-  // it -- the row is where the user was, and the pane is what they
+-  // just left.
++    if (!pluginReviewRequest) return;
++    setSelection({ kind: "plugin", id: pluginReviewRequest });
++    consumeExtensionReview();
++  }, [pluginReviewRequest, consumeExtensionReview]);
++
++  const ownPlugins = useMemo(
++    () => (plugins ?? []).filter((plugin) => !plugin.Builtin),
++    [plugins],
++  );
++  const builtInPlugins = useMemo(
++    () => (plugins ?? []).filter((plugin) => plugin.Builtin),
++    [plugins],
++  );
++  const runtimeStates = pluginLoadStates();
++  const pendingPlugins = ownPlugins.filter((plugin) => {
++    const status = pluginEffectiveStatus(
++      plugin,
++      runtimeStates.get(plugin.Manifest.id),
++      allowedNow,
++    );
++    return (
++      pluginNeedsReview(status) && !allowedNow.includes(plugin.Manifest.id)
++    );
++  });
++  const pendingIDs = new Set(
++    pendingPlugins.map((plugin) => plugin.Manifest.id),
++  );
++  const sharedPendingOrder = pluginsAwaitingReviewIds();
++  const pendingOrder = [
++    ...sharedPendingOrder.filter((id) => pendingIDs.has(id)),
++    ...pendingPlugins
++      .map((plugin) => plugin.Manifest.id)
++      .filter((id) => !sharedPendingOrder.includes(id)),
++  ];
++  const pending = pendingOrder.flatMap((id) =>
++    pendingPlugins.filter((plugin) => plugin.Manifest.id === id),
++  );
++  const installed = ownPlugins.filter(
++    (plugin) => !pendingIDs.has(plugin.Manifest.id),
++  );
++
++  useEffect(
++    () => onReviewCountChange?.(pending.length),
++    [onReviewCountChange, pending.length],
++  );
++
+   const closeDetail = useCallback(() => {
+-    const id = selection?.id
+-    setSelection(null)
+-    if (!id) return
+-    requestAnimationFrame(() => {
+-      document.querySelector<HTMLButtonElement>(`[data-extension-id="${id}"] [data-testid="extensions-row-open"]`)?.focus()
+-    })
+-  }, [selection])
+-
+-  // One control turns every non-built-in compiled-in extension off at
+-  // once, or back on. The calls run SEQUENTIALLY, not Promise.all:
+-  // SetExtensionEnabled is a read-modify-write over one shared JSON
+-  // blob, so firing the whole set concurrently lets a later write's
+-  // own read miss an earlier write's still-in-flight update.
+-  const allOff = NON_BUILT_IN_IDS.length > 0 && NON_BUILT_IN_IDS.every((id) => disabledIds.includes(id))
+-  const toggleAll = async () => {
+-    for (const id of NON_BUILT_IN_IDS) {
+-      await background(SettingsService.SetExtensionEnabled(id, allOff), 'extensions.setExtensionEnabled')
+-    }
+-    await refreshDisabledExtensions()
+-  }
+-
+-  const selectedRow = selection?.kind === 'builtin' ? EXTENSION_ROWS.find((r) => r.id === selection.id) : undefined
+-  const selectedPlugin = selection?.kind === 'plugin' ? plugins?.find((p) => p.Manifest.id === selection.id) : undefined
+-  const detail = selectedRow
+-    ? <ExtensionsBuiltInDetail row={selectedRow} appVersion={appVersion} showBackLink={!hasSidePane} onClose={closeDetail} />
+-    : selectedPlugin
+-      ? (
+-        <ExtensionsPluginDetail
+-          plugin={selectedPlugin}
+-          allowed={allowedNow.includes(selectedPlugin.Manifest.id)}
+-          onAllow={() => {
+-            const id = selectedPlugin.Manifest.id
+-            void background(SettingsService.SetPluginAllowed(id, true).then(() => setAllowedNow((prev) => [...prev, id])), 'extensions.setPluginAllowed')
+-          }}
+-          showBackLink={!hasSidePane}
+-          onClose={closeDetail}
+-        />
+-      )
+-      : null
++    const id = selection?.id;
++    setSelection(null);
++    if (!id) return;
++    requestAnimationFrame(() =>
++      document
++        .querySelector<HTMLElement>(`[data-extension-id="${id}"]`)
++        ?.focus(),
++    );
++  }, [selection]);
+ 
+-  // Below the two-pane breakpoint the detail REPLACES the list, with
+-  // its own back link -- the converged narrow-viewport list/detail
+-  // shape, never a side pane squeezed into a phone width.
+-  const listHidden = !hasSidePane && detail !== null
++  const selectedRow =
++    selection?.kind === "builtin"
++      ? EXTENSION_ROWS.find((row) => row.id === selection.id)
++      : undefined;
++  const selectedPlugin =
++    selection?.kind === "plugin"
++      ? plugins?.find((plugin) => plugin.Manifest.id === selection.id)
++      : undefined;
++  const detail = selectedRow ? (
++    <ExtensionsBuiltInDetail
++      row={selectedRow}
++      appVersion={appVersion}
++      disabled={disabledIds.includes(selectedRow.id)}
++      canDisable={selectedRow.id !== CARD_TOOL_ID}
++      showBackLink={!hasSidePane}
++      onClose={closeDetail}
++    />
++  ) : selectedPlugin ? (
++    <ExtensionsPluginDetail
++      plugin={selectedPlugin}
++      allowed={allowedNow.includes(selectedPlugin.Manifest.id)}
++      onAllow={() => {
++        const id = selectedPlugin.Manifest.id;
++        void background(
++          SettingsService.SetPluginAllowed(id, true).then(() =>
++            setAllowedNow((previous) => [...new Set([...previous, id])]),
++          ),
++          "extensions.setPluginAllowed",
++        );
++      }}
++      showBackLink={!hasSidePane}
++      onClose={closeDetail}
++    />
++  ) : null;
++  const listHidden = !hasSidePane && detail !== null;
++  const inventoryContext: CommandContext = {
++    kind: "extensionInventory",
++    ids: NON_BUILT_IN_IDS,
++    allOff: NON_BUILT_IN_IDS.every((id) => disabledIds.includes(id)),
++  };
++  const builtInCount = EXTENSION_ROWS.length + builtInPlugins.length;
++  const expanded = builtInsExpanded ?? ownPlugins.length === 0;
++  const count = ownPlugins.length > 0 ? listCountLabel({ total: ownPlugins.length, shown: ownPlugins.length }) : undefined;
+ 
+   return (
+     <Stack direction="vertical" gap="condensed">
+-      <Stack direction="horizontal" justify="space-between" align="start" gap="condensed">
+-        <Text as="p" size="small" className={listStyles.muted}>
+-          {t('settings.extensions.subtitle')}
+-        </Text>
+-        <Stack direction="horizontal" gap="condensed" align="center">
+-          <Link
+-            href="#"
+-            onClick={(e) => {
+-              e.preventDefault()
+-              useAppStore.getState().setView({ kind: 'docs', page: ATLAS_CONCEPTS_DOCS_PAGE })
+-            }}
+-            className={styles.headerLink}
+-            data-testid="extensions-docs-link"
+-          >
+-            {t('settings.extensions.docsLink')}
+-          </Link>
+-          <Button size="small" onClick={toggleAll} data-testid="extensions-toggle-all">
+-            {t(allOff ? 'settings.extensions.turnAllOn' : 'settings.extensions.turnAllOff')}
+-          </Button>
+-        </Stack>
++      <Stack
++        direction="horizontal"
++        justify="space-between"
++        align="center"
++        gap="condensed"
++        className={styles.inventoryToolbar}
++      >
++        <ListToolbar
++          query={query}
++          onQueryChange={setQuery}
++          searchAriaLabel={t("settings.extensions.searchAria")}
++          searchTestId="extensions-installed-search"
++          count={count}
++        />
++        <ExtensionCollectionMenu
++          context={inventoryContext}
++          allOff={inventoryContext.allOff}
++        />
+       </Stack>
+ 
+-      <div className={hasSidePane && detail ? styles.split : undefined}>
++      <div className={hasSidePane ? styles.split : undefined}>
+         {!listHidden && (
+-          <Stack direction="vertical" gap="condensed" data-testid="extensions-list">
+-            <Text as="h3" size="small" weight="semibold" className={listStyles.muted}>
+-              {t('settings.extensions.builtInTitle')}
+-            </Text>
+-            {/* One labelled list PER GROUP: a group as its own list
+-                keeps the headings out of the list's accessibility
+-                tree, where a single flat list would have hoisted them
+-                in as non-listitem children (aria-required-children). */}
+-            {SECTION_ORDER.map((group) => {
+-              const rows = EXTENSION_ROWS.filter((row) => row.group === group)
+-              if (rows.length === 0) return null
+-              return (
+-                <Stack direction="vertical" gap="none" key={group} data-testid={`extensions-group-${group}`}>
+-                  <Text as="h4" size="small" className={listStyles.muted}>
+-                    {groupSectionLabel(group)}
+-                  </Text>
+-                  <ul className={styles.rows} aria-label={groupSectionLabel(group)}>
+-                    {rows.map((row) => (
+-                      <li key={row.id}>
+-                        <ExtensionRow
+-                          id={row.id}
+-                          icon={row.icon}
+-                          name={row.label}
+-                          description={descriptionLabel(row)}
+-                          control={row.id === CARD_TOOL_ID ? 'built-in' : 'switch'}
+-                          enabled={!disabledIds.includes(row.id)}
+-                          selected={selection?.kind === 'builtin' && selection.id === row.id}
+-                          builtInLabel={t('settings.extensions.builtIn')}
+-                          onSelect={() => setSelection({ kind: 'builtin', id: row.id })}
+-                          onToggle={(enabled) => toggle(row.id, enabled)}
+-                        />
+-                      </li>
+-                    ))}
+-                  </ul>
+-                </Stack>
+-              )
+-            })}
+-            <ExtensionsInstalledPlugins
+-              plugins={plugins}
++          <div className={styles.inventoryRail} data-testid="extensions-list">
++            <ExtensionsInventory
++              query={query}
++              pending={pending}
++              installed={installed}
++              builtInRows={EXTENSION_ROWS}
++              builtInPlugins={builtInPlugins}
++              builtInCount={builtInCount}
++              builtInsExpanded={expanded}
+               allowedIds={allowedNow}
+-              selectedId={selection?.kind === 'plugin' ? selection.id : null}
+-              onSelect={(id) => setSelection({ kind: 'plugin', id })}
++              disabledIds={disabledIds}
++              selection={selection}
++              onBuiltInsExpandedChange={setBuiltInsExpanded}
++              onSelect={setSelection}
+             />
+-          </Stack>
++          </div>
+         )}
+-        {detail}
++        {hasSidePane &&
++          (detail ?? (
++            <div
++              className={styles.detail}
++              data-testid="extensions-detail-empty"
++            >
++              <Blankslate>
++                <Blankslate.Heading>
++                  {t("settings.extensions.selectHeading")}
++                </Blankslate.Heading>
++                <Blankslate.Description>
++                  {t("settings.extensions.selectDescription")}
++                </Blankslate.Description>
++              </Blankslate>
++            </div>
++          ))}
++        {!hasSidePane && detail}
+       </div>
+     </Stack>
+-  )
++  );
++
+ }
+diff --git a/frontend/src/views/ExtensionsView.tsx b/frontend/src/views/ExtensionsView.tsx
+index f83836c8c17de0a302a8cc4ca4d6aac6b59f0308..508ff8dba73b8ab53aa60dddc20214e69f6f5442 100644
+--- a/frontend/src/views/ExtensionsView.tsx
++++ b/frontend/src/views/ExtensionsView.tsx
+@@ -1,6 +1,6 @@
+ import { useEffect, useState } from 'react'
+ import { useTranslation } from 'react-i18next'
+-import { Banner, Button, Heading, SegmentedControl, Stack, Text } from '@primer/react'
++import { Banner, Heading, SegmentedControl, Stack, Text } from '@primer/react'
+ import PageContainer from '../shared/PageContainer'
+ import { useUISignalStore } from '../shared/uiSignalStore'
+ import ExtensionsSection from './ExtensionsSection'
+@@ -32,6 +32,7 @@ function tabFrom(value: string | undefined): ExtensionsTab {
+ export default function ExtensionsView({ initialTab }: { initialTab?: string } = {}) {
+   const { t } = useTranslation('views')
+   const [tab, setTab] = useState<ExtensionsTab>(tabFrom(initialTab))
++  const [reviewCount, setReviewCount] = useState(0)
+   const sourcesRequest = useUISignalStore((s) => s.extensionSourcesRequest)
+   const installedRequest = useUISignalStore((s) => s.extensionInstalledRequest)
+   const consumeInstalledRequest = useUISignalStore((s) => s.consumeExtensionInstalledRequest)
+@@ -64,34 +65,16 @@ export default function ExtensionsView({ initialTab }: { initialTab?: string } =
+   // reads that record and never fetches.
+   const updateCount = useExtensionUpdatesStore((s) => s.candidates.length)
+   useEffect(() => { void refreshUpdates() }, [])
+-  const importCommand = findCommand('extensions.importTheme')
+-  const canImport = importCommand !== undefined && (importCommand.enabled?.() ?? true)
+   const recoveryCommand = findCommand('extensions.retryRecovery')
+   const canRetryRecovery = recoveryCommand !== undefined && (recoveryCommand.enabled?.() ?? true)
+ 
+   return (
+     <PageContainer variant="wide" data-testid="extensions-view">
+       <Stack direction="vertical" gap="none">
+-        <Stack direction="horizontal" justify="space-between" align="center" gap="condensed">
+-          <Heading as="h1" id="extensions-heading">{t('extensions.heading')}</Heading>
+-          <Button disabled={!canImport} onClick={() => void runCommand('extensions.importTheme')} data-testid="extensions-import-theme">
+-            {t('extensions.themeImport.button')}
+-          </Button>
+-        </Stack>
++        <Heading as="h1" id="extensions-heading">{t('extensions.heading')}</Heading>
+         <Text as="p" size="small" className={listStyles.muted}>{t('extensions.subtitle')}</Text>
+       </Stack>
+ 
+-      <ExtensionsPolicyBanner />
+-      {recovery.unresolved && (
+-        <Banner
+-          variant="critical"
+-          title={t('extensions.recovery.title')}
+-          description={<Stack direction="vertical" gap="condensed"><Text>{t('extensions.recovery.message')}</Text>{recovery.detail && <Text>{recovery.detail}</Text>}</Stack>}
+-          primaryAction={<Banner.PrimaryAction disabled={!canRetryRecovery} onClick={() => { void runCommand('extensions.retryRecovery') }}>{t('extensions.recovery.retry')}</Banner.PrimaryAction>}
+-          data-testid="extensions-recovery-banner"
+-        />
+-      )}
+-
+       <SegmentedControl
+         aria-label={t('extensions.tabsAria')}
+         className={styles.tabs}
+@@ -112,7 +95,27 @@ export default function ExtensionsView({ initialTab }: { initialTab?: string } =
+         ))}
+       </SegmentedControl>
+ 
+-      {tab === 'installed' && <ExtensionsSection />}
++      {tab === 'installed' && reviewCount > 0 && (
++        <Banner
++          variant="warning"
++          title={t('settings.extensions.reviewRequiredTitle')}
++          description={t('settings.extensions.reviewRequiredDescription', { count: reviewCount })}
++          primaryAction={<Banner.PrimaryAction onClick={() => { void runCommand('extensions.review') }}>{t('settings.extensions.awaitingReviewAction')}</Banner.PrimaryAction>}
++          data-testid="extensions-review-banner"
++        />
++      )}
++      <ExtensionsPolicyBanner />
++      {recovery.unresolved && (
++        <Banner
++          variant="critical"
++          title={t('extensions.recovery.title')}
++          description={<Stack direction="vertical" gap="condensed"><Text>{t('extensions.recovery.message')}</Text>{recovery.detail && <Text>{recovery.detail}</Text>}</Stack>}
++          primaryAction={<Banner.PrimaryAction disabled={!canRetryRecovery} onClick={() => { void runCommand('extensions.retryRecovery') }}>{t('extensions.recovery.retry')}</Banner.PrimaryAction>}
++          data-testid="extensions-recovery-banner"
++        />
++      )}
++
++      {tab === 'installed' && <ExtensionsSection onReviewCountChange={setReviewCount} />}
+       {tab === 'browse' && <ExtensionsBrowseTab sourcesRequest={sourcesRequest} />}
+       {tab === 'updates' && <ExtensionsUpdatesTab />}
+       {importOpen && <ThemeImportDialog onClose={() => setImportOpen(false)} />}
+diff --git a/frontend/src/views/extensionInventory.test.ts b/frontend/src/views/extensionInventory.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..b177837a5357ebc0811cb3e9d51ec32085682955
+--- /dev/null
++++ b/frontend/src/views/extensionInventory.test.ts
+@@ -0,0 +1,77 @@
++import { describe, expect, it } from "vitest";
++import type { PluginInfo } from "../../bindings/github.com/alicoding/mill/internal/services/pluginsvc/models";
++import {
++  matchesExtension,
++  pluginNeedsReview,
++  pluginRowStatus,
++} from "./extensionInventory";
++
++function plugin(overrides: Partial<PluginInfo> = {}): PluginInfo {
++  return {
++    Manifest: {
++      id: "sample",
++      name: "Sample",
++      version: "1.0.0",
++      description: "Makes diagrams",
++    },
++    Builtin: false,
++    Tier: "verified",
++    Error: "",
++    ...overrides,
++  } as PluginInfo;
++}
++
++describe("extension inventory projections", () => {
++  it("keeps one status using the required priority", () => {
++    const item = plugin({ Error: "broken" });
++    expect(
++      pluginRowStatus({
++        plugin: item,
++        runtime: undefined,
++        status: "changed",
++        disabled: true,
++      }),
++    ).toEqual({ kind: "review" });
++    expect(
++      pluginRowStatus({
++        plugin: item,
++        runtime: undefined,
++        status: "policy",
++        disabled: true,
++      }),
++    ).toEqual({ kind: "blocked" });
++    expect(
++      pluginRowStatus({
++        plugin: item,
++        runtime: undefined,
++        status: "error",
++        disabled: true,
++      }),
++    ).toEqual({ kind: "error" });
++    expect(
++      pluginRowStatus({
++        plugin: plugin(),
++        runtime: undefined,
++        status: undefined,
++        disabled: true,
++      }),
++    ).toEqual({ kind: "disabled" });
++    expect(
++      pluginRowStatus({
++        plugin: plugin(),
++        runtime: undefined,
++        status: undefined,
++        disabled: false,
++      }),
++    ).toEqual({ kind: "trust", value: "verified" });
++  });
++
++  it("uses the shared review set and searches names and descriptions", () => {
++    expect(pluginNeedsReview("unallowed")).toBe(true);
++    expect(pluginNeedsReview("changed")).toBe(true);
++    expect(pluginNeedsReview("blocked")).toBe(false);
++    expect(matchesExtension("sample", "Sample", "Makes diagrams")).toBe(true);
++    expect(matchesExtension("diagram", "Sample", "Makes diagrams")).toBe(true);
++    expect(matchesExtension("missing", "Sample", "Makes diagrams")).toBe(false);
++  });
++});
+diff --git a/frontend/src/views/extensionInventory.ts b/frontend/src/views/extensionInventory.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..a1c62193670c33fd43eec1239b541e0169718969
+--- /dev/null
++++ b/frontend/src/views/extensionInventory.ts
+@@ -0,0 +1,69 @@
++import type { PluginInfo } from "../../bindings/github.com/alicoding/mill/internal/services/pluginsvc/models";
++import type { PluginLoadState } from "../plugins/loader";
++
++export type ExtensionRowStatusKind =
++  "review" | "blocked" | "error" | "waits" | "disabled" | "trust";
++
++export interface ExtensionRowStatus {
++  kind: ExtensionRowStatusKind;
++  value?: string;
++}
++
++export function pluginEffectiveStatus(
++  plugin: PluginInfo,
++  runtime: PluginLoadState | undefined,
++  allowedIds: readonly string[],
++): string | undefined {
++  if (runtime?.status) return runtime.status;
++  if (
++    !plugin.Builtin &&
++    (plugin.ApprovalState === "unallowed" || plugin.ApprovalState === "changed")
++  )
++    return plugin.ApprovalState;
++  if (!plugin.Builtin && plugin.ApprovalState !== "allowed") return "error";
++  if (plugin.ThemeImport && !allowedIds.includes(plugin.Manifest.id))
++    return "unallowed";
++  return undefined;
++}
++
++export function pluginNeedsReview(status: string | undefined): boolean {
++  return status === "unallowed" || status === "changed";
++}
++
++// A row carries one status only. The detail retains the lower-priority
++// facts, while this ordered projection keeps the inventory scannable.
++export function pluginRowStatus({
++  plugin,
++  runtime,
++  status,
++  disabled,
++}: {
++  plugin: PluginInfo;
++  runtime: PluginLoadState | undefined;
++  status: string | undefined;
++  disabled: boolean;
++}): ExtensionRowStatus {
++  if (pluginNeedsReview(status)) return { kind: "review" };
++  if (status === "policy" || status === "blocked" || status === "unsigned")
++    return { kind: "blocked" };
++  if (plugin.Error || status === "error") return { kind: "error" };
++  if (status === "waits") return { kind: "waits", value: runtime?.waitsFor };
++  if (disabled || status === "disabled") return { kind: "disabled" };
++  return {
++    kind: "trust",
++    value: plugin.Tier || (plugin.Builtin ? "built-in" : ""),
++  };
++}
++
++export function matchesExtension(
++  query: string,
++  name: string,
++  description?: string,
++): boolean {
++  const normalized = query.trim().toLowerCase();
++  if (normalized === "") return true;
++  return (
++    name.toLowerCase().includes(normalized) ||
++    (description ?? "").toLowerCase().includes(normalized)
++  );
++}

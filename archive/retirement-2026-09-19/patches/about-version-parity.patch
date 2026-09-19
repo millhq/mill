@@ -1,0 +1,417 @@
+diff --git a/build/darwin/Taskfile.yml b/build/darwin/Taskfile.yml
+index ad688d8cfaadbd2fb00081c76c5732246e8b8831..58ca12d05c4f096137b45c48466b37cf6c9e19f4 100644
+--- a/build/darwin/Taskfile.yml
++++ b/build/darwin/Taskfile.yml
+@@ -181,22 +181,15 @@ tasks:
+         fi
+       - cp "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS"
+       - cp build/darwin/Info.plist "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents"
+-      # Stamps the bundle's own About-panel version with the SAME value
+-      # the binary reports (goal 0335): MILL_VERSION for a real release
+-      # (release.yml computes it from the pushed tag), else
+-      # MILL_UPDATE_VERSION for a beta (already the ldflags value
+-      # above's own source, ci.yml's beta job) -- unset for a plain
+-      # local `task package`, which leaves the committed plist default
+-      # untouched rather than writing a version nobody asked for.
+-      # PlistBuddy is macOS-only, guarded the same way codesign below
+-      # already is for a cross-compiled darwin bundle built from a
+-      # non-mac host.
++      # Keep the native About panel on the binary's effective version:
++      # release, then beta, then build/config.yml's local fallback. The
++      # adapter updates a temporary plist and replaces this generated
++      # copy only after both version keys succeed.
+       - |
+-        V="${MILL_VERSION:-${MILL_UPDATE_VERSION:-}}"
+-        if [ -n "$V" ] && [ "{{OS}}" = "darwin" ]; then
+-          PLIST="{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Info.plist"
+-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $V" "$PLIST"
+-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $V" "$PLIST"
++        if [ "{{OS}}" = "darwin" ]; then
++          go run ./internal/tools/macosbundleversion build/config.yml "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Info.plist"
++        else
++          echo "Skipping macOS bundle version stamp (PlistBuddy is unavailable on {{OS}})."
+         fi
+       - task: '{{if eq OS "darwin"}}codesign:identity{{else}}codesign:skip{{end}}'
+ 
+@@ -268,6 +261,12 @@ tasks:
+         fi
+       - cp "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/MacOS"
+       - cp "build/darwin/Info.dev.plist" "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/Info.plist"
++      - |
++        if [ "{{OS}}" = "darwin" ]; then
++          go run ./internal/tools/macosbundleversion build/config.yml "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/Info.plist"
++        else
++          echo "Skipping macOS bundle version stamp (PlistBuddy is unavailable on {{OS}})."
++        fi
+       - codesign --force --deep --sign - "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app"
+       - '"{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/MacOS/{{.APP_NAME}}"'
+ 
+diff --git a/internal/tools/macosbundleversion/main.go b/internal/tools/macosbundleversion/main.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..61853c0323d0053d245a0120a0d3580f579fafb6
+--- /dev/null
++++ b/internal/tools/macosbundleversion/main.go
+@@ -0,0 +1,124 @@
++// Package main stamps a generated macOS bundle plist with Mill's effective version.
++package main
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strings"
++	"time"
++
++	"gopkg.in/yaml.v3"
++)
++
++const plistBuddyPath = "/usr/libexec/PlistBuddy"
++
++type buildConfig struct {
++	Info *struct {
++		Version *string `yaml:"version"`
++	} `yaml:"info"`
++}
++
++func main() {
++	if err := run(os.Args[1:], os.Getenv); err != nil {
++		fmt.Fprintf(os.Stderr, "macosbundleversion: %v\n", err)
++		os.Exit(1)
++	}
++}
++
++func run(args []string, getenv func(string) string) error {
++	if len(args) != 2 {
++		return errors.New("usage: macosbundleversion <build-config.yml> <Info.plist>")
++	}
++
++	version, err := effectiveVersion(args[0], getenv)
++	if err != nil {
++		return err
++	}
++	return stampPlist(args[1], version)
++}
++
++func effectiveVersion(configPath string, getenv func(string) string) (string, error) {
++	if version := getenv("MILL_VERSION"); version != "" {
++		return version, nil
++	}
++	if version := getenv("MILL_UPDATE_VERSION"); version != "" {
++		return version, nil
++	}
++
++	raw, err := os.ReadFile(configPath) // #nosec G304,G703 -- the packaging task supplies the repository-owned config path
++	if err != nil {
++		return "", fmt.Errorf("read build config: %w", err)
++	}
++	var config buildConfig
++	if err := yaml.Unmarshal(raw, &config); err != nil {
++		return "", fmt.Errorf("parse build config: %w", err)
++	}
++	if config.Info == nil {
++		return "", errors.New("build config is missing info")
++	}
++	if config.Info.Version == nil {
++		return "", errors.New("build config is missing info.version")
++	}
++	version := strings.TrimSpace(*config.Info.Version)
++	if version == "" {
++		return "", errors.New("build config info.version is empty")
++	}
++	return version, nil
++}
++
++func stampPlist(plistPath, version string) error {
++	info, err := os.Stat(plistPath) // #nosec G703 -- the packaging task supplies the generated bundle plist path
++	if err != nil {
++		return fmt.Errorf("stat plist: %w", err)
++	}
++	original, err := os.ReadFile(plistPath) // #nosec G304,G703 -- the packaging task supplies the generated bundle plist path
++	if err != nil {
++		return fmt.Errorf("read plist: %w", err)
++	}
++
++	temporary, err := os.CreateTemp(filepath.Dir(plistPath), "."+filepath.Base(plistPath)+".version-*")
++	if err != nil {
++		return fmt.Errorf("create temporary plist: %w", err)
++	}
++	temporaryPath := temporary.Name()
++	keepTemporary := true
++	defer func() {
++		if keepTemporary {
++			_ = os.Remove(temporaryPath) // #nosec G703 -- CreateTemp returned this same-directory path
++		}
++	}()
++
++	if _, err := temporary.Write(original); err != nil {
++		_ = temporary.Close()
++		return fmt.Errorf("copy plist to temporary file: %w", err)
++	}
++	if err := temporary.Chmod(info.Mode().Perm()); err != nil {
++		_ = temporary.Close()
++		return fmt.Errorf("preserve plist permissions: %w", err)
++	}
++	if err := temporary.Close(); err != nil {
++		return fmt.Errorf("close temporary plist: %w", err)
++	}
++
++	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
++	defer cancel()
++	command := exec.CommandContext( // #nosec G204 -- the executable is the fixed native PlistBuddy path
++		ctx,
++		plistBuddyPath,
++		"-c", "Set :CFBundleShortVersionString "+version,
++		"-c", "Set :CFBundleVersion "+version,
++		temporaryPath,
++	)
++	if output, err := command.CombinedOutput(); err != nil {
++		return fmt.Errorf("stamp plist: %w: %s", err, strings.TrimSpace(string(output)))
++	}
++	if err := os.Rename(temporaryPath, plistPath); err != nil { // #nosec G703 -- both paths are in the generated plist's directory
++		return fmt.Errorf("replace plist: %w", err)
++	}
++	keepTemporary = false
++	return nil
++}
+diff --git a/internal/tools/macosbundleversion/main_test.go b/internal/tools/macosbundleversion/main_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..da996621708cec9cab8db47e38c2f015211cbc6a
+--- /dev/null
++++ b/internal/tools/macosbundleversion/main_test.go
+@@ -0,0 +1,233 @@
++package main
++
++import (
++	"bytes"
++	"context"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"reflect"
++	"runtime"
++	"strings"
++	"testing"
++	"time"
++)
++
++func TestRunStampsProductionAndDevTemplatesFromConfig(t *testing.T) {
++	requirePlistBuddy(t)
++	configPath := repoPath(t, "build", "config.yml")
++
++	tests := []struct {
++		name      string
++		template  string
++		otherKeys []string
++	}{
++		{
++			name:      "production",
++			template:  "Info.plist",
++			otherKeys: []string{"CFBundleIdentifier", "CFBundleName", "CFBundleIconName"},
++		},
++		{
++			name:      "development",
++			template:  "Info.dev.plist",
++			otherKeys: []string{"CFBundleIdentifier", "CFBundleName", "NSAppTransportSecurity:NSAllowsLocalNetworking"},
++		},
++	}
++
++	for _, test := range tests {
++		t.Run(test.name, func(t *testing.T) {
++			plistPath := copyFixture(t, repoPath(t, "build", "darwin", test.template))
++			before := plistValues(t, plistPath, test.otherKeys)
++
++			if err := run([]string{configPath, plistPath}, emptyEnvironment); err != nil {
++				t.Fatalf("run: %v", err)
++			}
++
++			assertVersions(t, plistPath, "0.5.0")
++			after := plistValues(t, plistPath, test.otherKeys)
++			if !reflect.DeepEqual(after, before) {
++				t.Fatalf("unrelated plist values changed: before=%v after=%v", before, after)
++			}
++		})
++	}
++}
++
++func TestRunPreservesOverridePrecedence(t *testing.T) {
++	requirePlistBuddy(t)
++	configPath := repoPath(t, "build", "config.yml")
++
++	tests := []struct {
++		name string
++		env  map[string]string
++		want string
++	}{
++		{name: "both absent use config", env: map[string]string{}, want: "0.5.0"},
++		{name: "release override", env: map[string]string{"MILL_VERSION": "1.2.3"}, want: "1.2.3"},
++		{name: "beta override", env: map[string]string{"MILL_UPDATE_VERSION": "0.6.0-beta.123"}, want: "0.6.0-beta.123"},
++		{
++			name: "release wins over beta",
++			env:  map[string]string{"MILL_VERSION": "1.2.3", "MILL_UPDATE_VERSION": "0.6.0-beta.123"},
++			want: "1.2.3",
++		},
++	}
++
++	for _, test := range tests {
++		t.Run(test.name, func(t *testing.T) {
++			plistPath := copyFixture(t, repoPath(t, "build", "darwin", "Info.plist"))
++			if err := run([]string{configPath, plistPath}, mapEnvironment(test.env)); err != nil {
++				t.Fatalf("run: %v", err)
++			}
++			assertVersions(t, plistPath, test.want)
++		})
++	}
++}
++
++func TestRunRejectsInvalidConfigWithoutChangingPlist(t *testing.T) {
++	requirePlistBuddy(t)
++
++	tests := []struct {
++		name   string
++		config string
++		want   string
++	}{
++		{name: "malformed yaml", config: "info: [\n", want: "parse build config"},
++		{name: "missing info", config: "version: '3'\n", want: "missing info"},
++		{name: "missing version", config: "info:\n  productName: Mill\n", want: "missing info.version"},
++		{name: "empty version", config: "info:\n  version: '  '\n", want: "info.version is empty"},
++	}
++
++	for _, test := range tests {
++		t.Run(test.name, func(t *testing.T) {
++			workDir := t.TempDir()
++			configPath := filepath.Join(workDir, "config.yml")
++			if err := os.WriteFile(configPath, []byte(test.config), 0o600); err != nil {
++				t.Fatalf("write config: %v", err)
++			}
++			plistPath := copyFixtureTo(t, repoPath(t, "build", "darwin", "Info.plist"), workDir)
++			before, err := os.ReadFile(plistPath) // #nosec G304 -- test path is a disposable fixture
++			if err != nil {
++				t.Fatalf("read before: %v", err)
++			}
++
++			err = run([]string{configPath, plistPath}, emptyEnvironment)
++			if err == nil || !strings.Contains(err.Error(), test.want) {
++				t.Fatalf("run error = %v, want containing %q", err, test.want)
++			}
++			after, readErr := os.ReadFile(plistPath) // #nosec G304 -- test path is a disposable fixture
++			if readErr != nil {
++				t.Fatalf("read after: %v", readErr)
++			}
++			if !bytes.Equal(after, before) {
++				t.Fatal("plist bytes changed after config refusal")
++			}
++		})
++	}
++}
++
++func TestRunLeavesOriginalUntouchedWhenSecondPlistUpdateFails(t *testing.T) {
++	requirePlistBuddy(t)
++	plistPath := copyFixture(t, repoPath(t, "build", "darwin", "Info.plist"))
++	runPlistBuddy(t, plistPath, "Delete :CFBundleVersion")
++	before, err := os.ReadFile(plistPath) // #nosec G304 -- test path is a disposable fixture
++	if err != nil {
++		t.Fatalf("read before: %v", err)
++	}
++
++	err = run(
++		[]string{repoPath(t, "build", "config.yml"), plistPath},
++		mapEnvironment(map[string]string{"MILL_VERSION": "1.2.3"}),
++	)
++	if err == nil || !strings.Contains(err.Error(), "stamp plist") {
++		t.Fatalf("run error = %v, want plist stamping failure", err)
++	}
++	after, readErr := os.ReadFile(plistPath) // #nosec G304 -- test path is a disposable fixture
++	if readErr != nil {
++		t.Fatalf("read after: %v", readErr)
++	}
++	if !bytes.Equal(after, before) {
++		t.Fatal("original plist changed after the second Set failed")
++	}
++}
++
++func requirePlistBuddy(t *testing.T) {
++	t.Helper()
++	if runtime.GOOS != "darwin" {
++		t.Skip("native PlistBuddy is only available on macOS")
++	}
++	if _, err := os.Stat(plistBuddyPath); err != nil {
++		t.Fatalf("PlistBuddy unavailable: %v", err)
++	}
++}
++
++func repoPath(t *testing.T, parts ...string) string {
++	t.Helper()
++	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
++	if err != nil {
++		t.Fatalf("resolve repository root: %v", err)
++	}
++	return filepath.Join(append([]string{root}, parts...)...)
++}
++
++func copyFixture(t *testing.T, source string) string {
++	t.Helper()
++	return copyFixtureTo(t, source, t.TempDir())
++}
++
++func copyFixtureTo(t *testing.T, source, destinationDir string) string {
++	t.Helper()
++	raw, err := os.ReadFile(source) // #nosec G304 -- tests supply repository fixtures
++	if err != nil {
++		t.Fatalf("read fixture: %v", err)
++	}
++	destination := filepath.Join(destinationDir, filepath.Base(source))
++	if err := os.WriteFile(destination, raw, 0o600); err != nil { // #nosec G703 -- destination is inside t.TempDir
++		t.Fatalf("write fixture: %v", err)
++	}
++	return destination
++}
++
++func emptyEnvironment(string) string { return "" }
++
++func mapEnvironment(values map[string]string) func(string) string {
++	return func(key string) string { return values[key] }
++}
++
++func assertVersions(t *testing.T, plistPath, want string) {
++	t.Helper()
++	for _, key := range []string{"CFBundleShortVersionString", "CFBundleVersion"} {
++		if got := plistValue(t, plistPath, key); got != want {
++			t.Errorf("%s = %q, want %q", key, got, want)
++		}
++	}
++}
++
++func plistValues(t *testing.T, plistPath string, keys []string) map[string]string {
++	t.Helper()
++	values := make(map[string]string, len(keys))
++	for _, key := range keys {
++		values[key] = plistValue(t, plistPath, key)
++	}
++	return values
++}
++
++func plistValue(t *testing.T, plistPath, key string) string {
++	t.Helper()
++	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
++	defer cancel()
++	command := exec.CommandContext(ctx, plistBuddyPath, "-c", "Print :"+key, plistPath) // #nosec G204 -- test keys and paths are controlled fixtures
++	output, err := command.CombinedOutput()
++	if err != nil {
++		t.Fatalf("PlistBuddy Print %s: %v: %s", key, err, output)
++	}
++	return strings.TrimSpace(string(output))
++}
++
++func runPlistBuddy(t *testing.T, plistPath, commandText string) {
++	t.Helper()
++	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
++	defer cancel()
++	command := exec.CommandContext(ctx, plistBuddyPath, "-c", commandText, plistPath) // #nosec G204 -- test command and path are controlled fixtures
++	if output, err := command.CombinedOutput(); err != nil {
++		t.Fatalf("PlistBuddy %q: %v: %s", commandText, err, output)
++	}
++}

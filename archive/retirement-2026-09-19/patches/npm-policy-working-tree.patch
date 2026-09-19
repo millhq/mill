@@ -1,0 +1,2966 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index f014ea38f3282f0653d576ef2f83ef3c62301aa4..a2277213a63bc9c04deec0f5e9ad90529b1e93e9 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -705,10 +705,11 @@ jobs:
+       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+         with:
+-          node-version: '24'
++          node-version: '24.21.0'
+           cache: 'npm'
+           cache-dependency-path: frontend/package-lock.json
+-      - run: npm ci
++      - run: npm install --global --no-audit --no-fund --loglevel=error npm@12.0.2
++      - run: npm run deps:ci
+         working-directory: frontend
+       - run: ./scripts/check-sdk-freshness.sh
+       - run: npm run plugin:typecheck
+@@ -734,7 +735,7 @@ jobs:
+       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+         with:
+-          node-version: '24'
++          node-version: '24.21.0'
+           cache: 'npm'
+           cache-dependency-path: frontend/package-lock.json
+       # goal 0419 S1c: npm has no --max-warnings-style gate of its own,
+@@ -746,12 +747,19 @@ jobs:
+         working-directory: frontend
+         run: |
+           set -o pipefail
+-          npm ci --loglevel=warn 2>&1 | tee /tmp/npm-ci.log
++          npm install --global --no-audit --no-fund --loglevel=error npm@12.0.2
++          npm run deps:ci -- --loglevel=warn 2>&1 | tee /tmp/npm-ci.log
+           if grep -q '^npm warn deprecated' /tmp/npm-ci.log; then
+             echo "::error::npm ci reported a deprecated dependency -- pin the non-deprecated transitive via frontend/package.json's overrides." >&2
+             grep '^npm warn deprecated' /tmp/npm-ci.log >&2
+             exit 1
+           fi
++      - run: node ../scripts/check-npm-install-policy.mjs
++        working-directory: frontend
++      - run: npm run deps:policy:test
++        working-directory: frontend
++      - run: npm run css-modules:policy:test
++        working-directory: frontend
+       - if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.plugins == 'true'
+         run: npm run lint
+         working-directory: frontend
+@@ -1201,10 +1209,11 @@ jobs:
+           cache: true
+       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+         with:
+-          node-version: '24'
++          node-version: '24.21.0'
+           cache: 'npm'
+           cache-dependency-path: frontend/package-lock.json
+-      - run: npm ci
++      - run: npm install --global --no-audit --no-fund --loglevel=error npm@12.0.2
++      - run: npm run deps:ci
+         working-directory: frontend
+       - run: npm run test
+         working-directory: frontend
+@@ -1278,10 +1287,11 @@ jobs:
+           cache: true
+       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+         with:
+-          node-version: '24'
++          node-version: '24.21.0'
+           cache: 'npm'
+           cache-dependency-path: frontend/package-lock.json
+-      - run: npm ci
++      - run: npm install --global --no-audit --no-fund --loglevel=error npm@12.0.2
++      - run: npm run deps:ci
+         working-directory: frontend
+       # Browser binaries cached by Playwright version: the uncached
+       # `install --with-deps` path stalls in its apt phase on flaky
+@@ -1305,7 +1315,10 @@ jobs:
+       # until the job's 15-minute cap) this caching exists to kill --
+       # observed persisting even on cache-miss runs.
+       - if: steps.pw-cache.outputs.cache-hit != 'true'
+-        run: npx playwright install chromium
++        run: ./node_modules/.bin/playwright install chromium
++        working-directory: frontend
++      - if: matrix.shardIndex == 1
++        run: npm run css-modules:policy:test -- --hmr
+         working-directory: frontend
+       # 3-shard matrix + playwright.config.ts's workers: CI ? 1 : 4 (goal
+       # 0024): the prior single-job, workers:2-in-CI shape was the actual
+@@ -1317,7 +1330,7 @@ jobs:
+       # (vitest) -- confirmed locally (view-hotkeys.spec.ts, NODE_OPTIONS
+       # set) that the Playwright runner's own runtime trips nothing; a
+       # real deprecated call inside app code under test still surfaces.
+-      - run: npx playwright test --shard=${{ matrix.shardIndex }}/${{ matrix.shardTotal }}
++      - run: ./node_modules/.bin/playwright test --shard=${{ matrix.shardIndex }}/${{ matrix.shardTotal }}
+         working-directory: frontend
+         env:
+           NODE_OPTIONS: --throw-deprecation
+@@ -1376,10 +1389,11 @@ jobs:
+           cache: true
+       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+         with:
+-          node-version: '24'
++          node-version: '24.21.0'
+           cache: 'npm'
+           cache-dependency-path: frontend/package-lock.json
+-      - run: npm ci
++      - run: npm install --global --no-audit --no-fund --loglevel=error npm@12.0.2
++      - run: npm run deps:ci
+         working-directory: frontend
+       - name: Resolve Playwright version
+         id: pw-version
+@@ -1391,7 +1405,7 @@ jobs:
+           path: ~/.cache/ms-playwright
+           key: playwright-chromium-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
+       - if: steps.pw-cache.outputs.cache-hit != 'true'
+-        run: npx playwright install chromium
++        run: ./node_modules/.bin/playwright install chromium
+         working-directory: frontend
+       # JSON reporter alongside line (human console output) so the step
+       # summary below can PARSE which spec files were selected, rather
+@@ -1408,7 +1422,7 @@ jobs:
+           # test` (vitest) and the required e2e job -- confirmed locally
+           # the Playwright runner's own runtime trips nothing.
+           NODE_OPTIONS: --throw-deprecation
+-        run: npx playwright test --only-changed=origin/main --reporter=line,json
++        run: ./node_modules/.bin/playwright test --only-changed=origin/main --reporter=line,json
+       - name: Write step summary
+         if: always()
+         run: |
+@@ -1608,9 +1622,10 @@ jobs:
+           cache: true
+       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+         with:
+-          node-version: '24'
++          node-version: '24.21.0'
+           cache: 'npm'
+           cache-dependency-path: frontend/package-lock.json
++      - run: npm install --global --no-audit --no-fund --loglevel=error npm@12.0.2
+       - name: Install Task and wails3 CLI
+         run: |
+           go install github.com/go-task/task/v3/cmd/task@v3.52.0
+diff --git a/.github/workflows/claude-build.yml b/.github/workflows/claude-build.yml
+index 89319bb712fd8dda2357d65ef59359996314014b..86ae957ff42b7b55afbaf13ceb9fdec5cdff405f 100644
+--- a/.github/workflows/claude-build.yml
++++ b/.github/workflows/claude-build.yml
+@@ -75,11 +75,12 @@ jobs:
+ 
+       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+         with:
+-          node-version: '24'
++          node-version: '24.21.0'
+           cache: 'npm'
+           cache-dependency-path: frontend/package-lock.json
+ 
+-      - run: npm ci
++      - run: npm install --global --no-audit --no-fund --loglevel=error npm@12.0.2
++      - run: npm run deps:ci
+         working-directory: frontend
+ 
+       # Same cache-by-version pattern as ci.yml's e2e job: the runner
+@@ -98,7 +99,7 @@ jobs:
+           key: playwright-chromium-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
+ 
+       - if: steps.pw-cache.outputs.cache-hit != 'true'
+-        run: npx playwright install chromium
++        run: ./node_modules/.bin/playwright install chromium
+         working-directory: frontend
+ 
+       - name: Run the brief
+diff --git a/.github/workflows/engineering-health.yml b/.github/workflows/engineering-health.yml
+index b6639b0fdd6037d24e0152a43360bc20b0d0fe68..bdd7a44d92ac2cb0555c00982baeee864c52db41 100644
+--- a/.github/workflows/engineering-health.yml
++++ b/.github/workflows/engineering-health.yml
+@@ -55,10 +55,11 @@ jobs:
+           cache: true
+       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+         with:
+-          node-version: '24'
++          node-version: '24.21.0'
+           cache: 'npm'
+           cache-dependency-path: frontend/package-lock.json
+-      - run: npm ci
++      - run: npm install --global --no-audit --no-fund --loglevel=error npm@12.0.2
++      - run: npm run deps:ci
+         working-directory: frontend
+ 
+       - name: Gather window bounds
+@@ -178,14 +179,14 @@ jobs:
+         working-directory: frontend
+         run: |
+           set -euo pipefail
+-          npx eslint . -f json > ../enghealth-data/eslint.json || true
++          ./node_modules/.bin/eslint . -f json > ../enghealth-data/eslint.json || true
+ 
+       # --- code: coverage --------------------------------------------------
+       - name: Go coverage profile
+         run: go test ./internal/... -coverprofile=enghealth-data/cover.out || true
+       - name: Vitest coverage summary
+         working-directory: frontend
+-        run: npx vitest run --coverage --coverage.reporter=json-summary || true
++        run: ./node_modules/.bin/vitest run --coverage --coverage.reporter=json-summary || true
+       - run: cp frontend/coverage/coverage-summary.json enghealth-data/coverage-summary.json || true
+ 
+       # --- dependencies + machinery: open PRs -----------------------------
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index 98883cf7dc60070c0e358c19d19122148da05eff..caaf292062eb918bb8df4718064c5f780b6c795c 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -78,9 +78,10 @@ jobs:
+           cache: true
+       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+         with:
+-          node-version: '24'
++          node-version: '24.21.0'
+           cache: 'npm'
+           cache-dependency-path: frontend/package-lock.json
++      - run: npm install --global --no-audit --no-fund --loglevel=error npm@12.0.2
+       # Task installed via go install, not arduino/setup-task: the tool
+       # itself is MIT but that ACTION wrapper is GPL-3.0, which trips
+       # dependency-review's deny-licenses on any PR touching this file.
+diff --git a/.github/workflows/webview-smoke.yml b/.github/workflows/webview-smoke.yml
+index ceb234062331bf98a0125d4a4f342bcd4466dc83..e5a14152c9a814b15d3fbeca7794ca8d5b5d024b 100644
+--- a/.github/workflows/webview-smoke.yml
++++ b/.github/workflows/webview-smoke.yml
+@@ -38,9 +38,10 @@ jobs:
+           cache: true
+       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+         with:
+-          node-version: '24'
++          node-version: '24.21.0'
+           cache: 'npm'
+           cache-dependency-path: frontend/package-lock.json
+-      - run: npm ci
++      - run: npm install --global --no-audit --no-fund --loglevel=error npm@12.0.2
++      - run: npm run deps:ci
+         working-directory: frontend
+       - run: ./scripts/webview-bridge-smoke.sh
+diff --git a/build/Taskfile.yml b/build/Taskfile.yml
+index 51cbd3d99071593a15000ea6b38e68496349765c..862999eec55b20010110fd7f8721b0723ac2836d 100644
+--- a/build/Taskfile.yml
++++ b/build/Taskfile.yml
+@@ -27,7 +27,7 @@ tasks:
+       - sh: npm version
+         msg: "Looks like npm isn't installed. Npm is part of the Node installer: https://nodejs.org/en/download/"
+     cmds:
+-      - npm install
++      - npm run deps:ci
+ 
+   install:frontend:deps:bun:
+     dir: frontend
+@@ -37,11 +37,9 @@ tasks:
+       - bun.lockb
+     generates:
+       - node_modules
+-    preconditions:
+-      - sh: bun --version
+-        msg: "bun not found"
+     cmds:
+-      - bun install
++      - echo "Unsupported frontend installer 'bun'; use the committed npm lock with PACKAGE_MANAGER=npm." >&2
++      - exit 1
+ 
+   install:frontend:deps:pnpm:
+     dir: frontend
+@@ -50,11 +48,9 @@ tasks:
+       - pnpm-lock.yaml
+     generates:
+       - node_modules
+-    preconditions:
+-      - sh: pnpm --version
+-        msg: "pnpm not found"
+     cmds:
+-      - pnpm install
++      - echo "Unsupported frontend installer 'pnpm'; use the committed npm lock with PACKAGE_MANAGER=npm." >&2
++      - exit 1
+ 
+   install:frontend:deps:yarn:
+     dir: frontend
+@@ -63,11 +59,9 @@ tasks:
+       - yarn.lock
+     status:
+       - test -d node_modules || test -f .pnp.cjs
+-    preconditions:
+-      - sh: yarn --version
+-        msg: "yarn not found"
+     cmds:
+-      - yarn install
++      - echo "Unsupported frontend installer 'yarn'; use the committed npm lock with PACKAGE_MANAGER=npm." >&2
++      - exit 1
+ 
+   build:frontend:
+     label: build:frontend (DEV={{.DEV}} RUNNER={{.PACKAGE_MANAGER}})
+diff --git a/build/docker/Dockerfile.cross b/build/docker/Dockerfile.cross
+index faa09a161072a023cbc7ca9c85cc3c61aa8446c6..5137ddef6a6e3c0b0163544a8b8df191ac156893 100644
+--- a/build/docker/Dockerfile.cross
++++ b/build/docker/Dockerfile.cross
+@@ -20,11 +20,24 @@ ARG GARBLE_VERSION=v0.16.0
+ 
+ # Install base tools, GCC, and GTK/WebKit dev packages
+ RUN apt-get update && apt-get install -y --no-install-recommends \
+-    curl xz-utils python3 nodejs npm pkg-config gcc libc6-dev \
++    curl xz-utils python3 pkg-config gcc libc6-dev \
+     libgtk-3-dev libwebkit2gtk-4.1-dev \
+     libgtk-4-dev libwebkitgtk-6.0-dev \
+     && rm -rf /var/lib/apt/lists/*
+ 
++ARG NODE_VERSION=24.21.0
++RUN NODE_ARCH=$(case "${TARGETARCH}" in arm64) echo "arm64" ;; amd64) echo "x64" ;; *) echo "Unsupported Node target architecture: ${TARGETARCH}" >&2; exit 1 ;; esac) && \
++    NODE_SHA=$(case "${NODE_ARCH}" in \
++      arm64) echo "6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2" ;; \
++      *) echo "fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6" ;; \
++    esac) && \
++    NODE_FILE="node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" && \
++    curl -fSL "https://nodejs.org/dist/v${NODE_VERSION}/${NODE_FILE}" -o "/tmp/${NODE_FILE}" && \
++    echo "${NODE_SHA}  /tmp/${NODE_FILE}" | sha256sum -c - && \
++    tar -xJf "/tmp/${NODE_FILE}" -C /usr/local --strip-components=1 && \
++    rm "/tmp/${NODE_FILE}" && \
++    npm install --global --no-audit --no-fund --loglevel=error npm@12.0.2
++
+ RUN go install mvdan.cc/garble@${GARBLE_VERSION}
+ 
+ # Install Zig - automatically selects correct binary for host architecture.
+@@ -185,7 +198,7 @@ export CGO_CFLAGS="-w"
+ 
+ # Build frontend if exists and not already built (host may have built it)
+ if [ -d "frontend" ] && [ -f "frontend/package.json" ] && [ ! -d "frontend/dist" ]; then
+-    (cd frontend && npm install --silent && npm run build --silent)
++    (cd frontend && npm run deps:ci --silent && npm run build --silent)
+ fi
+ 
+ # Build
+diff --git a/frontend/.npmrc b/frontend/.npmrc
+index 5e68cfa8fc6723c327b47717790054add3f4d03b..b4e49520a2069a17f22fe68270ae5a8d05f27b39 100644
+--- a/frontend/.npmrc
++++ b/frontend/.npmrc
+@@ -1,5 +1,8 @@
+-# Refuse to install package versions published less than 7 days (10080 minutes)
+-# ago, reducing exposure to freshly compromised or malicious releases.
+-# Honoured by pnpm and bun; npm currently has no native support and ignores it,
+-# so this is harmless today and forward-compatible.
+-minimum-release-age=10080
++# npm measures min-release-age in days. Resolution refuses releases younger
++# than seven days; scripts/npm-lock-policy.mjs applies the same rule to locks.
++min-release-age=7
++min-release-age-exclude=
++strict-allow-scripts=true
++engine-strict=true
++package-lock=true
++omit-lockfile-registry-resolved=false
+diff --git a/frontend/.nvmrc b/frontend/.nvmrc
+new file mode 100644
+index 0000000000000000000000000000000000000000..df6ae3370f9f89272d88629c442cf554d6c1f9fb
+--- /dev/null
++++ b/frontend/.nvmrc
+@@ -0,0 +1 @@
++24.21.0
+diff --git a/frontend/package-lock.json b/frontend/package-lock.json
+index 7d00ce46e5b2713f39cf6a8910f3faa25de60bc0..95718b19532da83e3417849b88b9d6ed535baa73 100644
+--- a/frontend/package-lock.json
++++ b/frontend/package-lock.json
+@@ -7,6 +7,7 @@
+     "": {
+       "name": "mill-frontend",
+       "version": "0.0.0",
++      "hasInstallScript": true,
+       "license": "Apache-2.0",
+       "dependencies": {
+         "@codemirror/autocomplete": "^6.20.3",
+@@ -77,12 +78,18 @@
+         "eslint-plugin-sonarjs": "^4.2.0",
+         "globals": "^17.12.0",
+         "jsdom": "^30.0.1",
++        "postcss": "8.5.26",
+         "typedoc": "^0.28.20",
+         "typedoc-plugin-markdown": "^4.13.0",
+         "typescript": "^6.0.3",
+         "typescript-eslint": "^8.69.0",
+         "vite": "^8.2.2",
++        "vite-css-modules": "1.16.0",
+         "vitest": "^5.0.0"
++      },
++      "engines": {
++        "node": "24.21.0",
++        "npm": "12.0.2"
+       }
+     },
+     "node_modules/@antfu/install-pkg": {
+@@ -2661,6 +2668,36 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/@rollup/pluginutils": {
++      "version": "5.4.0",
++      "resolved": "https://registry.npmjs.org/@rollup/pluginutils/-/pluginutils-5.4.0.tgz",
++      "integrity": "sha512-MfPp06CjRLfXQ3wY0R8vJDYBy/MvVcc9OulEfR0B8Iv9ko+GCNaRZ+EpJYFl27LhKsZK0o420sYCRHCjfCgeUg==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "@types/estree": "^1.0.0",
++        "estree-walker": "^2.0.2",
++        "picomatch": "^4.0.2"
++      },
++      "engines": {
++        "node": ">=14.0.0"
++      },
++      "peerDependencies": {
++        "rollup": "^1.20.0||^2.0.0||^3.0.0||^4.0.0"
++      },
++      "peerDependenciesMeta": {
++        "rollup": {
++          "optional": true
++        }
++      }
++    },
++    "node_modules/@rollup/pluginutils/node_modules/estree-walker": {
++      "version": "2.0.2",
++      "resolved": "https://registry.npmjs.org/estree-walker/-/estree-walker-2.0.2.tgz",
++      "integrity": "sha512-Rfkk/Mp/DL7JVje3u18FxFujQlTNR2q6QfMSMB7AvCBx91NGj/ba3kCfza0f6dVDbw7YlRf/nDrn7pQrCCyQ/w==",
++      "dev": true,
++      "license": "MIT"
++    },
+     "node_modules/@shikijs/engine-oniguruma": {
+       "version": "3.23.0",
+       "resolved": "https://registry.npmjs.org/@shikijs/engine-oniguruma/-/engine-oniguruma-3.23.0.tgz",
+@@ -3156,7 +3193,7 @@
+       "version": "19.2.18",
+       "resolved": "https://registry.npmjs.org/@types/react/-/react-19.2.18.tgz",
+       "integrity": "sha512-AnzbBERsrLKtk2XSfTbYRLjQPdy116Sty4q+T+Bp3IC4l6jNBvreVPAHmpq9qhXQM7CXZPjLVmGMw9sy+hxQ3w==",
+-      "devOptional": true,
++      "dev": true,
+       "license": "MIT",
+       "dependencies": {
+         "csstype": "^3.2.2"
+@@ -3166,7 +3203,7 @@
+       "version": "19.2.7",
+       "resolved": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.2.7.tgz",
+       "integrity": "sha512-I8bPpDLcHBv1qiIiXDCy71Rt8eQDKJP0sMSWJphDdAcdqiJ1sGpZamavoEIRZmYzjia9LuEb2HlYdDpmoENpvQ==",
+-      "devOptional": true,
++      "dev": true,
+       "license": "MIT",
+       "peerDependencies": {
+         "@types/react": "^19.2.0"
+@@ -4310,6 +4347,20 @@
+       "integrity": "sha512-saHYOzhIQs6wy2sVxTM6bUDsQO4F50V9RQ22qBpEdCW+I+/Wmke2HOl6lS6dTpdxVhb88/I6+Hs+438c3lfUow==",
+       "license": "MIT"
+     },
++    "node_modules/cleye": {
++      "version": "2.6.0",
++      "resolved": "https://registry.npmjs.org/cleye/-/cleye-2.6.0.tgz",
++      "integrity": "sha512-u0SQCsega/ox+2GSuUlG6wvA9c2FtH8sPmv9G9Q3JRTs7FK6+LtaziRAQgx7lrJ1J7bOd3palhwgZKMg8R6JbQ==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "terminal-columns": "^2.0.0",
++        "type-flag": "^4.1.0"
++      },
++      "funding": {
++        "url": "https://github.com/privatenumber/cleye?sponsor=1"
++      }
++    },
+     "node_modules/clsx": {
+       "version": "2.1.1",
+       "resolved": "https://registry.npmjs.org/clsx/-/clsx-2.1.1.tgz",
+@@ -4483,6 +4534,16 @@
+         "node": ">= 8"
+       }
+     },
++    "node_modules/css-class-positions": {
++      "version": "1.0.0",
++      "resolved": "https://registry.npmjs.org/css-class-positions/-/css-class-positions-1.0.0.tgz",
++      "integrity": "sha512-EyOWsNQ9he35D7iTc89TFt8BFZVAsoJ6s42O3YHS70KuwOPltOkcslrzwaAGvh+++tXj2t6t4yIwQQq82KTuTA==",
++      "dev": true,
++      "license": "MIT",
++      "funding": {
++        "url": "https://github.com/privatenumber/css-class-positions?sponsor=1"
++      }
++    },
+     "node_modules/css-tree": {
+       "version": "3.2.1",
+       "resolved": "https://registry.npmjs.org/css-tree/-/css-tree-3.2.1.tgz",
+@@ -4497,6 +4558,19 @@
+         "node": "^10 || ^12.20.0 || ^14.13.0 || >=15.0.0"
+       }
+     },
++    "node_modules/cssesc": {
++      "version": "3.0.0",
++      "resolved": "https://registry.npmjs.org/cssesc/-/cssesc-3.0.0.tgz",
++      "integrity": "sha512-/Tb/JcjK111nNScGob5MNtsntNM1aCNUDipB/TkwZFhyDrrE47SOx/18wF2bbjgc3ZzCSKW1T5nt5EbFoAz/Vg==",
++      "dev": true,
++      "license": "MIT",
++      "bin": {
++        "cssesc": "bin/cssesc"
++      },
++      "engines": {
++        "node": ">=4"
++      }
++    },
+     "node_modules/csstype": {
+       "version": "3.2.3",
+       "resolved": "https://registry.npmjs.org/csstype/-/csstype-3.2.3.tgz",
+@@ -5921,6 +5995,16 @@
+       "integrity": "sha512-3c7yD6rK1EXIsqpcu1ZVzXJugODWNMzvUij6yTiziaAHrpNS8kzFOI9mJLE8pmG4K9JOaVgzQRgklfOEk8f4Tg==",
+       "license": "MIT"
+     },
++    "node_modules/generic-names": {
++      "version": "4.0.0",
++      "resolved": "https://registry.npmjs.org/generic-names/-/generic-names-4.0.0.tgz",
++      "integrity": "sha512-ySFolZQfw9FoDb3ed9d80Cm9f0+r7qj+HJkWjeD9RBfpxEVTlVhol+gvaQB/78WbwYfbnNh8nWHHBSlg072y6A==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "loader-utils": "^3.2.0"
++      }
++    },
+     "node_modules/genson-js": {
+       "version": "0.0.8",
+       "resolved": "https://registry.npmjs.org/genson-js/-/genson-js-0.0.8.tgz",
+@@ -5976,6 +6060,19 @@
+         "node": ">= 0.4"
+       }
+     },
++    "node_modules/get-tsconfig": {
++      "version": "4.14.3",
++      "resolved": "https://registry.npmjs.org/get-tsconfig/-/get-tsconfig-4.14.3.tgz",
++      "integrity": "sha512-++QEw4DIY7WGoukz+/+A/8dGYPT9l9yIadnmSgZ8Rjr3YVSVDipQSO9CdnJo9ePqFqUUqh+wk9uIaoiAwsiPkA==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "resolve-pkg-maps": "^1.0.0"
++      },
++      "funding": {
++        "url": "https://github.com/privatenumber/get-tsconfig?sponsor=1"
++      }
++    },
+     "node_modules/glob-parent": {
+       "version": "6.0.2",
+       "resolved": "https://registry.npmjs.org/glob-parent/-/glob-parent-6.0.2.tgz",
+@@ -6229,6 +6326,19 @@
+         "node": ">=0.10.0"
+       }
+     },
++    "node_modules/icss-utils": {
++      "version": "5.1.0",
++      "resolved": "https://registry.npmjs.org/icss-utils/-/icss-utils-5.1.0.tgz",
++      "integrity": "sha512-soFhflCVWLfRNOPU3iv5Z9VUdT44xFRbzjLsEzSr5AQmgqPMTHdU3PMT1Cf1ssx8fLNJDA1juftYl+PUcv3MqA==",
++      "dev": true,
++      "license": "ISC",
++      "engines": {
++        "node": "^10 || ^12 || >= 14"
++      },
++      "peerDependencies": {
++        "postcss": "^8.1.0"
++      }
++    },
+     "node_modules/ignore": {
+       "version": "5.3.2",
+       "resolved": "https://registry.npmjs.org/ignore/-/ignore-5.3.2.tgz",
+@@ -6915,6 +7025,16 @@
+         "uc.micro": "^2.0.0"
+       }
+     },
++    "node_modules/loader-utils": {
++      "version": "3.3.1",
++      "resolved": "https://registry.npmjs.org/loader-utils/-/loader-utils-3.3.1.tgz",
++      "integrity": "sha512-FMJTLMXfCLMLfJxcX9PFqX5qD88Z5MRGaZCVzfuqeZSPsyiBzs+pahDQjbIWz2QIzPZz0NX9Zy4FX3lmK6YHIg==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">= 12.13.0"
++      }
++    },
+     "node_modules/locate-path": {
+       "version": "6.0.0",
+       "resolved": "https://registry.npmjs.org/locate-path/-/locate-path-6.0.0.tgz",
+@@ -8412,6 +8532,90 @@
+         "node": "^10 || ^12 || >=14"
+       }
+     },
++    "node_modules/postcss-modules-extract-imports": {
++      "version": "3.1.0",
++      "resolved": "https://registry.npmjs.org/postcss-modules-extract-imports/-/postcss-modules-extract-imports-3.1.0.tgz",
++      "integrity": "sha512-k3kNe0aNFQDAZGbin48pL2VNidTF0w4/eASDsxlyspobzU3wZQLOGj7L9gfRe0Jo9/4uud09DsjFNH7winGv8Q==",
++      "dev": true,
++      "license": "ISC",
++      "engines": {
++        "node": "^10 || ^12 || >= 14"
++      },
++      "peerDependencies": {
++        "postcss": "^8.1.0"
++      }
++    },
++    "node_modules/postcss-modules-local-by-default": {
++      "version": "4.2.0",
++      "resolved": "https://registry.npmjs.org/postcss-modules-local-by-default/-/postcss-modules-local-by-default-4.2.0.tgz",
++      "integrity": "sha512-5kcJm/zk+GJDSfw+V/42fJ5fhjL5YbFDl8nVdXkJPLLW+Vf9mTD5Xe0wqIaDnLuL2U6cDNpTr+UQ+v2HWIBhzw==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "icss-utils": "^5.0.0",
++        "postcss-selector-parser": "^7.0.0",
++        "postcss-value-parser": "^4.1.0"
++      },
++      "engines": {
++        "node": "^10 || ^12 || >= 14"
++      },
++      "peerDependencies": {
++        "postcss": "^8.1.0"
++      }
++    },
++    "node_modules/postcss-modules-scope": {
++      "version": "3.2.1",
++      "resolved": "https://registry.npmjs.org/postcss-modules-scope/-/postcss-modules-scope-3.2.1.tgz",
++      "integrity": "sha512-m9jZstCVaqGjTAuny8MdgE88scJnCiQSlSrOWcTQgM2t32UBe+MUmFSO5t7VMSfAf/FJKImAxBav8ooCHJXCJA==",
++      "dev": true,
++      "license": "ISC",
++      "dependencies": {
++        "postcss-selector-parser": "^7.0.0"
++      },
++      "engines": {
++        "node": "^10 || ^12 || >= 14"
++      },
++      "peerDependencies": {
++        "postcss": "^8.1.0"
++      }
++    },
++    "node_modules/postcss-modules-values": {
++      "version": "4.0.0",
++      "resolved": "https://registry.npmjs.org/postcss-modules-values/-/postcss-modules-values-4.0.0.tgz",
++      "integrity": "sha512-RDxHkAiEGI78gS2ofyvCsu7iycRv7oqw5xMWn9iMoR0N/7mf9D50ecQqUo5BZ9Zh2vH4bCUR/ktCqbB9m8vJjQ==",
++      "dev": true,
++      "license": "ISC",
++      "dependencies": {
++        "icss-utils": "^5.0.0"
++      },
++      "engines": {
++        "node": "^10 || ^12 || >= 14"
++      },
++      "peerDependencies": {
++        "postcss": "^8.1.0"
++      }
++    },
++    "node_modules/postcss-selector-parser": {
++      "version": "7.1.6",
++      "resolved": "https://registry.npmjs.org/postcss-selector-parser/-/postcss-selector-parser-7.1.6.tgz",
++      "integrity": "sha512-7qASPzhKF2l2KLboRZux8CCTRMdGiV08vWmyKzPz22qZ7ZjQBOeY7rNzNoCLSUiftJ7HUq0GERHmxw/t0dCdMw==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "cssesc": "^3.0.0",
++        "util-deprecate": "^1.0.2"
++      },
++      "engines": {
++        "node": ">=4"
++      }
++    },
++    "node_modules/postcss-value-parser": {
++      "version": "4.2.0",
++      "resolved": "https://registry.npmjs.org/postcss-value-parser/-/postcss-value-parser-4.2.0.tgz",
++      "integrity": "sha512-1NNCs6uurfkVbeXG4S8JFT9t19m45ICnif8zWLd5oPSZ50QnwMfK+H3jv408d4jw/7Bttv5axS5IiHoLaVNHeQ==",
++      "dev": true,
++      "license": "MIT"
++    },
+     "node_modules/prelude-ls": {
+       "version": "1.2.1",
+       "resolved": "https://registry.npmjs.org/prelude-ls/-/prelude-ls-1.2.1.tgz",
+@@ -8715,9 +8919,9 @@
+       "license": "MIT"
+     },
+     "node_modules/qs": {
+-      "version": "6.15.3",
+-      "resolved": "https://registry.npmjs.org/qs/-/qs-6.15.3.tgz",
+-      "integrity": "sha512-O9gl3zCl5h5blw1KGUzQKhA5oUXSl8rwUIM5o0S3nCXMliSvy5Dzx7/DJcI+SwgICv+IneSZwhBh1oSyEHA71A==",
++      "version": "6.16.0",
++      "resolved": "https://registry.npmjs.org/qs/-/qs-6.16.0.tgz",
++      "integrity": "sha512-h6fhOIaRrID2CbEY2fqs+7t+UXZo+MLAnU5gRIq85uFtdiUPCdsApMlHhXogKVM4HM2DVbIjGNTTYH2OcmP1vA==",
+       "dev": true,
+       "license": "BSD-3-Clause",
+       "dependencies": {
+@@ -9233,6 +9437,16 @@
+         "url": "https://github.com/sponsors/ljharb"
+       }
+     },
++    "node_modules/resolve-pkg-maps": {
++      "version": "1.0.0",
++      "resolved": "https://registry.npmjs.org/resolve-pkg-maps/-/resolve-pkg-maps-1.0.0.tgz",
++      "integrity": "sha512-seS2Tj26TBVOC2NIc2rOe2y2ZO7efxITtLZcGSOnHHNOQ7CkiUBfw0Iw2ck6xkIhPwLhKNLS8BO+hEpngQlqzw==",
++      "dev": true,
++      "license": "MIT",
++      "funding": {
++        "url": "https://github.com/privatenumber/resolve-pkg-maps?sponsor=1"
++      }
++    },
+     "node_modules/ret": {
+       "version": "0.2.2",
+       "resolved": "https://registry.npmjs.org/ret/-/ret-0.2.2.tgz",
+@@ -9669,6 +9883,16 @@
+         "url": "https://opencollective.com/webpack"
+       }
+     },
++    "node_modules/terminal-columns": {
++      "version": "2.0.0",
++      "resolved": "https://registry.npmjs.org/terminal-columns/-/terminal-columns-2.0.0.tgz",
++      "integrity": "sha512-6IByuUjyNZJXUtwDNm+OIe62zgwwaRbH+WMNTcx05O2G5V9WhvluAAHJY8OvUdwmzMPpqAD/7EUpGdI6ae1aiQ==",
++      "dev": true,
++      "license": "MIT",
++      "funding": {
++        "url": "https://github.com/privatenumber/terminal-columns?sponsor=1"
++      }
++    },
+     "node_modules/tiny-invariant": {
+       "version": "1.3.3",
+       "resolved": "https://registry.npmjs.org/tiny-invariant/-/tiny-invariant-1.3.3.tgz",
+@@ -9871,6 +10095,16 @@
+         "node": ">= 0.8.0"
+       }
+     },
++    "node_modules/type-flag": {
++      "version": "4.5.0",
++      "resolved": "https://registry.npmjs.org/type-flag/-/type-flag-4.5.0.tgz",
++      "integrity": "sha512-1aLzxcL6u1O9XHieAJBBX9U4QzwzDTWN0ER9M7QQSvS24NBmGM+N8FcghlgHAzOvDlEEpOx4hEml9CVcDnflcw==",
++      "dev": true,
++      "license": "MIT",
++      "funding": {
++        "url": "https://github.com/privatenumber/type-flag?sponsor=1"
++      }
++    },
+     "node_modules/type-is": {
+       "version": "2.1.0",
+       "resolved": "https://registry.npmjs.org/type-is/-/type-is-2.1.0.tgz",
+@@ -9945,7 +10179,7 @@
+       "version": "6.0.3",
+       "resolved": "https://registry.npmjs.org/typescript/-/typescript-6.0.3.tgz",
+       "integrity": "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==",
+-      "devOptional": true,
++      "dev": true,
+       "license": "Apache-2.0",
+       "bin": {
+         "tsc": "bin/tsc",
+@@ -10164,6 +10398,13 @@
+         "react": "^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0"
+       }
+     },
++    "node_modules/util-deprecate": {
++      "version": "1.0.2",
++      "resolved": "https://registry.npmjs.org/util-deprecate/-/util-deprecate-1.0.2.tgz",
++      "integrity": "sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==",
++      "dev": true,
++      "license": "MIT"
++    },
+     "node_modules/uuid": {
+       "version": "14.0.1",
+       "resolved": "https://registry.npmjs.org/uuid/-/uuid-14.0.1.tgz",
+@@ -10315,6 +10556,46 @@
+         }
+       }
+     },
++    "node_modules/vite-css-modules": {
++      "version": "1.16.0",
++      "resolved": "https://registry.npmjs.org/vite-css-modules/-/vite-css-modules-1.16.0.tgz",
++      "integrity": "sha512-QbJnujJpYu3bROrlsBCKBmC7mngttmP3Ta6vTcI8z/ULxmsVPIXAZrcvyc+6b8LuEm4mDvyh8r/z46qem6bZGw==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "@jridgewell/remapping": "^2.3.5",
++        "@jridgewell/sourcemap-codec": "^1.5.5",
++        "@rollup/pluginutils": "^5.3.0",
++        "cleye": "^2.2.1",
++        "css-class-positions": "^1.0.0",
++        "generic-names": "^4.0.0",
++        "get-tsconfig": "^4.13.8",
++        "icss-utils": "^5.1.0",
++        "magic-string": "^0.30.21",
++        "postcss-modules-extract-imports": "^3.1.0",
++        "postcss-modules-local-by-default": "^4.2.0",
++        "postcss-modules-scope": "^3.2.1",
++        "postcss-modules-values": "^4.0.0",
++        "postcss-selector-parser": "^7.1.1",
++        "tinyglobby": "^0.2.16"
++      },
++      "bin": {
++        "vite-css-modules": "dist/cli/index.mjs"
++      },
++      "funding": {
++        "url": "https://github.com/privatenumber/vite-css-modules?sponsor=1"
++      },
++      "peerDependencies": {
++        "lightningcss": "^1.23.0",
++        "postcss": "^8.4.49",
++        "vite": "^5.0.12 || ^6.0.0 || ^7.0.0 || ^8.0.0"
++      },
++      "peerDependenciesMeta": {
++        "lightningcss": {
++          "optional": true
++        }
++      }
++    },
+     "node_modules/vitest": {
+       "version": "5.0.0",
+       "resolved": "https://registry.npmjs.org/vitest/-/vitest-5.0.0.tgz",
+diff --git a/frontend/package.json b/frontend/package.json
+index 9f81bd535ac9f84db594b7ceeee4d389b7e2892c..ae9a27d18ee54ca5cac32995b9b9817376f21f43 100644
+--- a/frontend/package.json
++++ b/frontend/package.json
+@@ -4,7 +4,33 @@
+   "version": "0.0.0",
+   "license": "Apache-2.0",
+   "type": "module",
++  "packageManager": "npm@12.0.2",
++  "engines": {
++    "node": "24.21.0",
++    "npm": "12.0.2"
++  },
++  "devEngines": {
++    "runtime": {
++      "name": "node",
++      "version": "24.21.0",
++      "onFail": "error"
++    },
++    "packageManager": {
++      "name": "npm",
++      "version": "12.0.2",
++      "onFail": "error"
++    }
++  },
++  "allowScripts": {
++    "fsevents@2.3.3": true
++  },
+   "scripts": {
++    "preinstall": "node ../scripts/npm-lock-policy.mjs --cwd . --allow-missing-lock",
++    "deps:ci": "node ../scripts/npm-install.mjs ci --cwd .",
++    "deps:install": "node ../scripts/npm-install.mjs install --cwd .",
++    "deps:update": "node ../scripts/npm-install.mjs update --cwd .",
++    "deps:policy:test": "node ../scripts/npm-policy-selftest.mjs",
++    "css-modules:policy:test": "node ../scripts/vite-css-modules-selftest.mjs",
+     "dev": "vite",
+     "build:frame": "MILL_FRAME_ENTRY=activation vite build --config vite.config.frame.ts --mode production && MILL_FRAME_ENTRY=bootstrap vite build --config vite.config.frame.ts --mode production && MILL_FRAME_ENTRY=measure vite build --config vite.config.frame.ts --mode production",
+     "build:dev": "tsc && vite build --minify false --mode development && npm run build:frame",
+@@ -88,11 +114,13 @@
+     "eslint-plugin-sonarjs": "^4.2.0",
+     "globals": "^17.12.0",
+     "jsdom": "^30.0.1",
++    "postcss": "8.5.26",
+     "typedoc": "^0.28.20",
+     "typedoc-plugin-markdown": "^4.13.0",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.69.0",
+     "vite": "^8.2.2",
++    "vite-css-modules": "1.16.0",
+     "vitest": "^5.0.0"
+   }
+ }
+diff --git a/frontend/vite.config.ts b/frontend/vite.config.ts
+index b8cd528c9f4a422916078535f2ac6595c5a01c90..3f49526fb82cdb9b5055cc0c88865ed180473992 100644
+--- a/frontend/vite.config.ts
++++ b/frontend/vite.config.ts
+@@ -5,6 +5,7 @@ import { defineConfig, type Plugin } from "vite";
+ import { configDefaults } from "vitest/config";
+ import react from "@vitejs/plugin-react";
+ import wails from "@wailsio/runtime/plugins/vite";
++import { patchCssModules } from "vite-css-modules";
+ import { pluginFrameDevMiddleware } from "./vite.config.frame.ts";
+ 
+ // The repo's HEAD at bundle-compile time -- compared at runtime against
+@@ -130,7 +131,7 @@ export default defineConfig({
+       },
+     },
+   },
+-  plugins: [react(), wails("./bindings"), goLivenessPlugin(), pluginFrameDevMiddleware()],
++  plugins: [patchCssModules(), react(), wails("./bindings"), goLivenessPlugin(), pluginFrameDevMiddleware()],
+   test: {
+     // e2e/**/*.spec.ts are Playwright tests (real browser + server),
+     // not Vitest unit tests -- exclude them here or Vitest tries to run
+diff --git a/lefthook.yml b/lefthook.yml
+index 411f55c707ed1de8af23331b662d5e3f1e367ce3..5d6b8c3b5d50202561898f2aa7577dbabad788ae 100644
+--- a/lefthook.yml
++++ b/lefthook.yml
+@@ -11,6 +11,15 @@ pre-commit:
+     - name: workflow-yaml
+       glob: ".github/workflows/*.yml"
+       run: ./scripts/check-workflow-yaml.sh
++    - name: npm-install-policy
++      glob: "{frontend/{package.json,.npmrc,.nvmrc},scripts/{npm-*,check-npm-*}.mjs,scripts/npm-policy.json,scripts/vendor-*.sh,build/Taskfile.yml,build/docker/Dockerfile.cross,.github/workflows/*.yml,lefthook.yml}"
++      run: cd frontend && node ../scripts/check-npm-install-policy.mjs
++    - name: npm-policy-selftest
++      glob: "{frontend/{package.json,.npmrc},scripts/npm-*.mjs,scripts/npm-policy.json}"
++      run: cd frontend && ../scripts/with-gate-lock.sh npm run deps:policy:test
++    - name: vite-css-modules-selftest
++      glob: "{frontend/{package.json,package-lock.json,vite.config.ts},frontend/src/**/*.module.css,scripts/vite-css-modules-selftest.mjs}"
++      run: cd frontend && ../scripts/with-gate-lock.sh npm run css-modules:policy:test
+     - name: actionlint
+       # goal 0419 S1c: semantic checks (expression types, deprecated
+       # runtimes, shellcheck on run: scripts) the parse-only check above
+@@ -414,4 +423,4 @@ pre-commit:
+     - name: tsc
+       root: "frontend/"
+       glob: "frontend/**/*.{ts,tsx}"
+-      run: npx tsc --noEmit
++      run: ./node_modules/.bin/tsc --noEmit
+diff --git a/scripts/check-notice-action-eslint-selftest.sh b/scripts/check-notice-action-eslint-selftest.sh
+index 355ba540d23e9f6825024693682118637e4c7397..8e5df635f53a1555eb1b62852169d3df73c26e08 100755
+--- a/scripts/check-notice-action-eslint-selftest.sh
++++ b/scripts/check-notice-action-eslint-selftest.sh
+@@ -21,7 +21,7 @@ probe() {
+   local want="$1" label="$2" content="$3" out rc
+   printf '%s' "$content" >"$fixture"
+   set +e
+-  out="$(cd "$frontend_dir" && npx eslint --format json "src/$(basename "$fixture")" 2>&1)"
++  out="$(cd "$frontend_dir" && ./node_modules/.bin/eslint --format json "src/$(basename "$fixture")" 2>&1)"
+   rc=$?
+   set -e
+   local hit
+diff --git a/scripts/check-npm-install-policy.mjs b/scripts/check-npm-install-policy.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..788c0c42e9b672513d3f1b35e31b82cf2c127639
+--- /dev/null
++++ b/scripts/check-npm-install-policy.mjs
+@@ -0,0 +1,153 @@
++import { readdir, readFile } from 'node:fs/promises'
++import { createRequire } from 'node:module'
++import path from 'node:path'
++import { fileURLToPath } from 'node:url'
++
++const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
++const frontendRoot = path.join(repoRoot, 'frontend')
++const requireFrontend = createRequire(path.join(frontendRoot, 'package.json'))
++const yaml = requireFrontend('yaml')
++const yamlVersion = requireFrontend('yaml/package.json').version
++if (yamlVersion !== '2.9.0' || typeof yaml.parse !== 'function') {
++  throw new Error(`npm install policy requires the reviewed yaml 2.9.0 parse API; found ${yamlVersion}`)
++}
++const parseYaml = yaml.parse
++
++const read = relative => readFile(path.join(repoRoot, relative), 'utf8')
++
++function check(condition, message, failures) {
++  if (!condition) failures.push(message)
++}
++
++function shellCommands(run) {
++  return run
++    .split('\n')
++    .map(line => line.trim())
++    .filter(line => line && !line.startsWith('#'))
++}
++
++function isNpmAcquisition(line) {
++  const words = line.replace(/^\(+/, '').split(/\s+/)
++  const npmIndex = words.indexOf('npm')
++  if (npmIndex < 0 || words[npmIndex + 1] === 'run') return false
++  return words.slice(npmIndex + 1).some(word => ['ci', 'install'].includes(word))
++}
++
++function invokesNpx(line) {
++  return line.replace(/^\(+/, '').split(/\s+/).includes('npx')
++}
++
++async function checkWorkflows(failures) {
++  const files = (await readdir(path.join(repoRoot, '.github/workflows')))
++    .filter(file => file.endsWith('.yml') || file.endsWith('.yaml'))
++    .map(file => `.github/workflows/${file}`)
++  let canonicalInstalls = 0
++  let cssModulesTests = 0
++  let cssModulesHmrTests = 0
++  for (const file of files) {
++    const workflow = parseYaml(await read(file))
++    for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
++      const steps = job.steps ?? []
++      const setupIndexes = []
++      const bootstrapIndexes = []
++      for (const [index, step] of steps.entries()) {
++        if (typeof step.uses === 'string' && step.uses.startsWith('actions/setup-node@')) {
++          setupIndexes.push(index)
++          check(step.with?.['node-version'] === '24.21.0', `${file}:${jobName} must pin Node 24.21.0`, failures)
++        }
++        if (typeof step.run !== 'string') continue
++        for (const command of shellCommands(step.run)) {
++          if (command === 'npm install --global --no-audit --no-fund --loglevel=error npm@12.0.2') {
++            bootstrapIndexes.push(index)
++            continue
++          }
++          check(!isNpmAcquisition(command), `${file}:${jobName} bypasses the canonical npm installer: ${command}`, failures)
++          if (command.startsWith('npm run deps:ci')) canonicalInstalls += 1
++          if (command === 'npm run css-modules:policy:test') cssModulesTests += 1
++          if (command === 'npm run css-modules:policy:test -- --hmr') cssModulesHmrTests += 1
++          check(!invokesNpx(command), `${file}:${jobName} lets npx acquire a runtime package: ${command}`, failures)
++        }
++      }
++      for (const setupIndex of setupIndexes) {
++        check(
++          bootstrapIndexes.some(index => index > setupIndex),
++          `${file}:${jobName} must pin npm 12.0.2 after setup-node`,
++          failures
++        )
++      }
++    }
++  }
++  check(canonicalInstalls === 8, `expected 8 workflow deps:ci calls, found ${canonicalInstalls}`, failures)
++  check(cssModulesTests === 1, `expected one workflow CSS Modules pipeline test, found ${cssModulesTests}`, failures)
++  check(cssModulesHmrTests === 1, `expected one workflow CSS Modules HMR test, found ${cssModulesHmrTests}`, failures)
++}
++
++async function checkPackage(failures) {
++  const manifest = JSON.parse(await read('frontend/package.json'))
++  check(manifest.packageManager === 'npm@12.0.2', 'packageManager must pin npm 12.0.2', failures)
++  check(manifest.engines?.node === '24.21.0', 'engines.node must pin Node 24.21.0', failures)
++  check(manifest.engines?.npm === '12.0.2', 'engines.npm must pin npm 12.0.2', failures)
++  check(manifest.devEngines?.runtime?.version === '24.21.0' && manifest.devEngines.runtime.onFail === 'error', 'devEngines.runtime must enforce Node 24.21.0', failures)
++  check(manifest.devEngines?.packageManager?.version === '12.0.2' && manifest.devEngines.packageManager.onFail === 'error', 'devEngines.packageManager must enforce npm 12.0.2', failures)
++  check(manifest.scripts?.preinstall === 'node ../scripts/npm-lock-policy.mjs --cwd . --allow-missing-lock', 'preinstall must validate direct frontend acquisition', failures)
++  check(manifest.scripts?.['deps:ci'] === 'node ../scripts/npm-install.mjs ci --cwd .', 'deps:ci must use npm-install.mjs', failures)
++  check(manifest.scripts?.['deps:install'] === 'node ../scripts/npm-install.mjs install --cwd .', 'deps:install must use npm-install.mjs', failures)
++  check(manifest.scripts?.['deps:update'] === 'node ../scripts/npm-install.mjs update --cwd .', 'deps:update must use bounded npm-install.mjs update mode', failures)
++  check(manifest.scripts?.['css-modules:policy:test'] === 'node ../scripts/vite-css-modules-selftest.mjs', 'CSS Modules pipeline test must use the committed self-test', failures)
++  check(manifest.devDependencies?.postcss === '8.5.26', 'the CSS Modules self-test must pin its public PostCSS parser to 8.5.26', failures)
++  check(manifest.devDependencies?.['vite-css-modules'] === '1.16.0', 'vite-css-modules must stay pinned to 1.16.0', failures)
++  const approvals = manifest.allowScripts ?? {}
++  check(Object.keys(approvals).length === 1 && approvals['fsevents@2.3.3'] === true, 'only fsevents@2.3.3 may run install scripts', failures)
++}
++
++async function checkTaskfiles(failures) {
++  const taskfile = parseYaml(await read('build/Taskfile.yml'))
++  const tasks = taskfile.tasks ?? {}
++  check(tasks['install:frontend:deps:npm']?.cmds?.includes('npm run deps:ci'), 'Taskfile npm install must use deps:ci', failures)
++  for (const manager of ['bun', 'pnpm', 'yarn']) {
++    const commands = tasks[`install:frontend:deps:${manager}`]?.cmds ?? []
++    check(commands.some(command => String(command).includes('Unsupported frontend installer')), `Taskfile ${manager} install must fail explicitly`, failures)
++    check(!commands.some(command => String(command).includes(`${manager} install`)), `Taskfile ${manager} must not acquire packages`, failures)
++  }
++}
++
++async function checkTextSurfaces(failures) {
++  const npmrc = await read('frontend/.npmrc')
++  for (const setting of [
++    'min-release-age=7',
++    'min-release-age-exclude=',
++    'strict-allow-scripts=true',
++    'engine-strict=true',
++    'package-lock=true',
++    'omit-lockfile-registry-resolved=false',
++  ]) check(npmrc.split('\n').includes(setting), `frontend/.npmrc must contain ${setting}`, failures)
++  check((await read('frontend/.nvmrc')).trim() === '24.21.0', 'frontend/.nvmrc must pin Node 24.21.0', failures)
++  const docker = await read('build/docker/Dockerfile.cross')
++  check(docker.includes('npm run deps:ci --silent'), 'Docker cross-build must use deps:ci', failures)
++  check(docker.includes('ARG NODE_VERSION=24.21.0'), 'Docker cross-build must pin Node 24.21.0', failures)
++  check(docker.includes('npm@12.0.2'), 'Docker cross-build must pin npm 12.0.2', failures)
++  check(!docker.includes('cd frontend && npm install'), 'Docker cross-build bypasses deps:ci', failures)
++  for (const file of ['scripts/vendor-markmap.sh', 'scripts/vendor-readability.sh']) {
++    const source = await read(file)
++    check(source.includes('run deps:install -- --cwd "$WORK"'), `${file} must use deps:install`, failures)
++    check(!source.includes('npx esbuild'), `${file} lets npx acquire esbuild`, failures)
++  }
++  check(!(await read('lefthook.yml')).includes('run: npx tsc'), 'lefthook lets npx acquire TypeScript', failures)
++  const viteConfig = await read('frontend/vite.config.ts')
++  check(viteConfig.includes('import { patchCssModules } from "vite-css-modules";'), 'Vite config must import the public patchCssModules entry point', failures)
++  check(viteConfig.includes('plugins: [patchCssModules(), react(),'), 'patchCssModules must run first with default options', failures)
++  const lefthook = await read('lefthook.yml')
++  check(lefthook.includes('npm run css-modules:policy:test'), 'lefthook must run the CSS Modules pipeline regression', failures)
++}
++
++const failures = []
++await checkPackage(failures)
++await checkTaskfiles(failures)
++await checkWorkflows(failures)
++await checkTextSurfaces(failures)
++if (failures.length) {
++  for (const failure of failures) console.error(`npm-install-policy: ${failure}`)
++  process.exitCode = 1
++} else {
++  console.log('npm-install-policy: OK')
++}
+diff --git a/scripts/npm-install.mjs b/scripts/npm-install.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..ac9d14dabac3ad760ba70359fe1f5f604e827c4b
+--- /dev/null
++++ b/scripts/npm-install.mjs
+@@ -0,0 +1,242 @@
++import { spawn } from 'node:child_process'
++import { readFile, realpath } from 'node:fs/promises'
++import path from 'node:path'
++import { fileURLToPath } from 'node:url'
++
++import { validateLock } from './npm-lock-policy.mjs'
++import { loadPinnedNpm } from './npm-runtime.mjs'
++
++const LOGLEVELS = new Set(['silent', 'error', 'warn', 'notice', 'http', 'info', 'verbose', 'silly'])
++const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']
++
++function parseArgs(args) {
++  const command = args.shift()
++  if (!['ci', 'install', 'update'].includes(command)) {
++    throw new Error('npm installer command must be ci, install, or update')
++  }
++  let cwd = process.cwd()
++  const forwarded = []
++  for (let i = 0; i < args.length; i += 1) {
++    if (args[i] === '--cwd') {
++      if (!args[i + 1]) throw new Error('--cwd requires a path')
++      cwd = path.resolve(args[i + 1])
++      i += 1
++    } else if (args[i] === '--') {
++      forwarded.push(...args.slice(i + 1))
++      break
++    } else {
++      forwarded.push(args[i])
++    }
++  }
++  return { command, cwd, forwarded }
++}
++
++function isRegistrySpec(spec) {
++  return spec?.registry === true && (spec.type !== 'alias' || spec.subSpec?.registry === true)
++}
++
++function parseForwarded(args, command, npa, cwd) {
++  const displayArgs = []
++  const packageArgs = []
++  let packageLockOnly = false
++  let ignoreScripts = false
++  for (let i = 0; i < args.length; i += 1) {
++    const arg = args[i]
++    if (['--no-audit', '--no-fund', '--silent'].includes(arg)) {
++      displayArgs.push(arg)
++    } else if (arg === '--package-lock-only') {
++      if (command === 'ci') throw new Error('npm ci does not accept --package-lock-only')
++      packageLockOnly = true
++    } else if (arg === '--ignore-scripts') {
++      ignoreScripts = true
++    } else if (arg === '--loglevel') {
++      const value = args[i + 1]
++      if (!LOGLEVELS.has(value)) throw new Error('npm installer refuses invalid --loglevel')
++      displayArgs.push(`--loglevel=${value}`)
++      i += 1
++    } else if (arg.startsWith('--loglevel=')) {
++      const value = arg.slice('--loglevel='.length)
++      if (!LOGLEVELS.has(value)) throw new Error('npm installer refuses invalid --loglevel')
++      displayArgs.push(arg)
++    } else if (arg.startsWith('-')) {
++      throw new Error(`npm installer refuses unsupported argument: ${arg.split('=')[0]}`)
++    } else {
++      if (command === 'ci') throw new Error('npm ci does not accept package arguments')
++      let spec
++      try {
++        spec = npa(arg, cwd)
++      } catch {
++        throw new Error('npm installer refuses an invalid package argument')
++      }
++      if (!isRegistrySpec(spec)) {
++        throw new Error('npm installer refuses a non-registry package argument')
++      }
++      if (command === 'update' && arg !== spec.name) {
++        throw new Error('npm update accepts explicit bare package names only')
++      }
++      packageArgs.push(arg)
++    }
++  }
++  if (command === 'update' && packageArgs.length === 0) {
++    throw new Error('npm update requires at least one explicit bare package name')
++  }
++  return { displayArgs, packageArgs, packageLockOnly, ignoreScripts }
++}
++
++async function validateDeclaredSpecs(cwd, npa) {
++  let manifest
++  try {
++    manifest = JSON.parse(await readFile(path.join(cwd, 'package.json'), 'utf8'))
++  } catch {
++    throw new Error(`npm installer requires a valid ${path.join(cwd, 'package.json')}`)
++  }
++  if (manifest.workspaces !== undefined) {
++    throw new Error('npm installer refuses workspace package acquisition')
++  }
++  for (const field of DEPENDENCY_FIELDS) {
++    const dependencies = manifest[field]
++    if (dependencies === undefined) continue
++    if (!dependencies || typeof dependencies !== 'object' || Array.isArray(dependencies)) {
++      throw new Error(`npm installer requires package.json ${field} to be an object`)
++    }
++    for (const [name, rawSpec] of Object.entries(dependencies)) {
++      let spec
++      try {
++        spec = typeof rawSpec === 'string' ? npa.resolve(name, rawSpec, cwd) : null
++      } catch {
++        spec = null
++      }
++      if (!isRegistrySpec(spec)) {
++        throw new Error(`npm installer refuses non-registry ${field} entry ${name}`)
++      }
++    }
++  }
++}
++
++function enforcedArgs(cwd, { packageLockOnly, ignoreScripts }) {
++  return [
++    `--prefix=${cwd}`,
++    '--global=false',
++    '--workspaces=false',
++    '--package-lock=true',
++    `--package-lock-only=${packageLockOnly}`,
++    '--omit-lockfile-registry-resolved=false',
++    '--min-release-age=7',
++    '--min-release-age-exclude=',
++    '--strict-allow-scripts=true',
++    '--dangerously-allow-all-scripts=false',
++    `--ignore-scripts=${ignoreScripts}`,
++    '--allow-directory=none',
++    '--allow-file=none',
++    '--allow-git=none',
++    '--allow-remote=none',
++  ]
++}
++
++function validateEffectiveConfig(config, cwd, expected) {
++  const actual = path.resolve(config.get('prefix'))
++  if (
++    actual !== cwd ||
++    config.get('global') !== false ||
++    config.get('location') !== 'user' ||
++    !config.isDefault('location')
++  ) {
++    throw new Error('npm installer effective target differs from the validated project directory')
++  }
++  if (
++    config.get('workspaces') !== false ||
++    config.get('package-lock') !== true ||
++    config.get('package-lock-only') !== expected.packageLockOnly ||
++    config.get('omit-lockfile-registry-resolved') !== false ||
++    config.get('min-release-age') !== 7 ||
++    config.flat.minReleaseAgeExclude?.length !== 0 ||
++    config.get('strict-allow-scripts') !== true ||
++    config.get('dangerously-allow-all-scripts') !== false ||
++    config.get('ignore-scripts') !== expected.ignoreScripts ||
++    config.get('allow-directory') !== 'none' ||
++    config.get('allow-file') !== 'none' ||
++    config.get('allow-git') !== 'none' ||
++    config.get('allow-remote') !== 'none'
++  ) {
++    throw new Error('npm installer could not enforce the locked-package policy')
++  }
++}
++
++const run = (executable, args, options) => new Promise((resolve, reject) => {
++  const child = spawn(executable, args, options)
++  child.once('error', reject)
++  child.once('exit', (code, signal) => resolve({ code, signal }))
++})
++
++async function runNpm(runtime, args, cwd) {
++  const result = await run(process.execPath, [runtime.npmCli, ...args], {
++    cwd,
++    env: process.env,
++    stdio: 'inherit',
++  })
++  if (result.signal) {
++    process.kill(process.pid, result.signal)
++    return false
++  }
++  if (result.code !== 0) {
++    process.exitCode = result.code ?? 1
++    return false
++  }
++  return true
++}
++
++async function runtimeFor(command, cwd, displayArgs, packageArgs, expected) {
++  const args = [command, ...packageArgs, ...displayArgs, ...enforcedArgs(cwd, expected)]
++  const runtime = await loadPinnedNpm({ argv: args, cwd })
++  validateEffectiveConfig(runtime.config, cwd, expected)
++  return { args, runtime }
++}
++
++async function main() {
++  const parsed = parseArgs(process.argv.slice(2))
++  const cwd = await realpath(parsed.cwd)
++  const initial = await loadPinnedNpm({ cwd })
++  const forwarded = parseForwarded(parsed.forwarded, parsed.command, initial.npa, cwd)
++  forwarded.ignoreScripts ||= initial.config.get('ignore-scripts') === true
++  await validateDeclaredSpecs(cwd, initial.npa)
++
++  if (parsed.command === 'ci') {
++    const phase = await runtimeFor('ci', cwd, forwarded.displayArgs, [], {
++      packageLockOnly: false,
++      ignoreScripts: forwarded.ignoreScripts,
++    })
++    await validateLock({ cwd, npmArgs: phase.args })
++    await runNpm(phase.runtime, phase.args, cwd)
++    return
++  }
++
++  const nativeCommand = parsed.command === 'update' ? 'update' : 'install'
++  const resolution = await runtimeFor(
++    nativeCommand,
++    cwd,
++    forwarded.displayArgs,
++    forwarded.packageArgs,
++    { packageLockOnly: true, ignoreScripts: true }
++  )
++  await validateLock({
++    cwd,
++    allowMissingLock: parsed.command === 'install',
++    npmArgs: resolution.args,
++  })
++  if (!(await runNpm(resolution.runtime, resolution.args, cwd))) return
++
++  const materialization = await runtimeFor('ci', cwd, forwarded.displayArgs, [], {
++    packageLockOnly: false,
++    ignoreScripts: forwarded.ignoreScripts,
++  })
++  await validateLock({ cwd, npmArgs: materialization.args })
++  if (forwarded.packageLockOnly) return
++  await runNpm(materialization.runtime, materialization.args, cwd)
++}
++
++if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
++  main().catch(error => {
++    console.error(error.message)
++    process.exitCode = 1
++  })
++}
+diff --git a/scripts/npm-lock-policy.mjs b/scripts/npm-lock-policy.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..90a45154f803511d9dc0547b4bc69e471425a6e0
+--- /dev/null
++++ b/scripts/npm-lock-policy.mjs
+@@ -0,0 +1,262 @@
++import { access, readFile } from 'node:fs/promises'
++import path from 'node:path'
++import { fileURLToPath } from 'node:url'
++
++import { loadPinnedNpm } from './npm-runtime.mjs'
++
++const DAY_MS = 24 * 60 * 60 * 1000
++const MINIMUM_AGE_DAYS = 7
++const BASELINE_COMMIT = '2fac32290622c94b9a0d8d569e8f5a3a6352ee3b'
++const POLICY_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'npm-policy.json')
++
++const exists = file => access(file).then(() => true, () => false)
++
++function parseArgs(args) {
++  let cwd = process.cwd()
++  let allowMissingLock = false
++  const npmArgs = []
++  for (let i = 0; i < args.length; i += 1) {
++    if (args[i] === '--cwd') {
++      if (!args[i + 1]) throw new Error('--cwd requires a path')
++      cwd = path.resolve(args[i + 1])
++      i += 1
++    } else if (args[i] === '--allow-missing-lock') {
++      allowMissingLock = true
++    } else if (args[i] === '--npm-arg') {
++      if (!args[i + 1]) throw new Error('--npm-arg requires a value')
++      npmArgs.push(args[i + 1])
++      i += 1
++    } else {
++      throw new Error(`unknown npm policy argument: ${args[i]}`)
++    }
++  }
++  return { cwd, allowMissingLock, npmArgs }
++}
++
++function artifactIdentity(raw, label) {
++  let url
++  try {
++    url = new URL(raw)
++  } catch {
++    throw new Error(`${label} has an invalid artifact URL`)
++  }
++  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
++    throw new Error(`${label} has an unsupported or credential-bearing artifact URL`)
++  }
++  return `${url.protocol}//${url.host}${url.pathname}`
++}
++
++function lockedIdentity(node, npa, cwd) {
++  const sourceNames = new Set()
++  for (const edge of node.edgesIn) {
++    let source
++    try {
++      source = npa.resolve(edge.name, edge.spec, cwd)
++    } catch {
++      source = null
++    }
++    if (!source?.registry) continue
++    sourceNames.add(source.type === 'alias' ? source.subSpec?.name : source.name)
++  }
++  const [name] = sourceNames
++  const version = node.version
++  const spec = name && version ? npa.resolve(name, version, cwd) : null
++  const bundleDeclarations = [node.package.bundleDependencies, node.package.bundledDependencies]
++  const hasBundledDependencies = bundleDeclarations.some(value =>
++    value !== undefined && value !== false && (!Array.isArray(value) || value.length > 0)
++  )
++  if (
++    node.isLink || node.isWorkspace || node.inDepBundle || hasBundledDependencies ||
++    !node.isRegistryDependency || sourceNames.size !== 1 ||
++    node.packageName !== name || !spec?.registry || spec.type !== 'version'
++  ) {
++    const display = name && version ? `${name}@${version}` : node.location
++    throw new Error(`npm policy refuses unsupported dependency source: ${display}`)
++  }
++  if (!name || !version || !node.resolved || !node.integrity) {
++    throw new Error(`npm policy requires complete registry identity at ${node.location}`)
++  }
++  return {
++    name,
++    version,
++    resolved: artifactIdentity(node.resolved, `${name}@${version}`),
++    integrity: node.integrity,
++  }
++}
++
++function validateDeclaredSources(tree, npa, cwd) {
++  for (const node of tree.inventory.values()) {
++    for (const edge of node.edgesOut.values()) {
++      let source
++      try {
++        source = npa.resolve(edge.name, edge.spec, cwd)
++      } catch {
++        source = null
++      }
++      if (!source?.registry || (source.type === 'alias' && !source.subSpec?.registry)) {
++        throw new Error(`npm policy refuses unsupported dependency source: ${edge.name}`)
++      }
++    }
++  }
++}
++
++function exactAdmission(admissions, locked, published) {
++  return admissions.some(entry =>
++    entry.name === locked.name &&
++    entry.version === locked.version &&
++    entry.integrity === locked.integrity &&
++    entry.published === published
++  )
++}
++
++function validatePolicyRecord(policy) {
++  if (
++    policy.minimumAgeDays !== MINIMUM_AGE_DAYS ||
++    policy.baselineCommit !== BASELINE_COMMIT ||
++    !Array.isArray(policy.existingPinAdmissions)
++  ) {
++    throw new Error('npm policy record does not match the reviewed rollout boundary')
++  }
++  const identities = new Set()
++  for (const entry of policy.existingPinAdmissions) {
++    if (
++      typeof entry.name !== 'string' || !entry.name ||
++      typeof entry.version !== 'string' || !entry.version ||
++      typeof entry.integrity !== 'string' || !entry.integrity ||
++      !Number.isFinite(Date.parse(entry.published))
++    ) {
++      throw new Error('npm policy record contains an incomplete existing-pin admission')
++    }
++    const identity = `${entry.name}\0${entry.version}\0${entry.integrity}\0${entry.published}`
++    if (identities.has(identity)) {
++      throw new Error(`npm policy record repeats ${entry.name}@${entry.version}`)
++    }
++    identities.add(identity)
++  }
++}
++
++async function validatePackage({ name, locked, pacote, ssri, config, cutoff, now, admissions }) {
++  let packument
++  try {
++    packument = await pacote.packument(name, { ...config.flat, fullMetadata: true })
++  } catch (error) {
++    throw new Error(`npm policy could not read registry metadata for ${name}: ${error.code ?? 'request failed'}`)
++  }
++
++  for (const entry of locked) {
++    const manifest = packument.versions?.[entry.version]
++    if (!manifest || manifest.name !== entry.name || manifest.version !== entry.version) {
++      throw new Error(`npm policy found no matching registry version for ${entry.name}@${entry.version}`)
++    }
++    const published = packument.time?.[entry.version]
++    const publishedAt = Date.parse(published)
++    if (!Number.isFinite(publishedAt)) {
++      throw new Error(`npm policy found no valid publication time for ${entry.name}@${entry.version}`)
++    }
++    if (publishedAt > now) {
++      throw new Error(`npm policy refuses future publication time for ${entry.name}@${entry.version}`)
++    }
++
++    const registryArtifact = artifactIdentity(
++      manifest.dist?.tarball,
++      `${entry.name}@${entry.version} registry metadata`
++    )
++    if (registryArtifact !== entry.resolved) {
++      throw new Error(`npm policy artifact identity mismatch for ${entry.name}@${entry.version}`)
++    }
++
++    let lockedIntegrity
++    let registryIntegrity
++    try {
++      lockedIntegrity = ssri.parse(entry.integrity, { strict: true })
++      registryIntegrity = ssri.parse(manifest.dist?.integrity, { strict: true })
++    } catch {
++      throw new Error(`npm policy found invalid integrity for ${entry.name}@${entry.version}`)
++    }
++    if (!lockedIntegrity || !registryIntegrity || !lockedIntegrity.match(registryIntegrity)) {
++      throw new Error(`npm policy integrity mismatch for ${entry.name}@${entry.version}`)
++    }
++
++    if (publishedAt > cutoff && !exactAdmission(admissions, entry, published)) {
++      throw new Error(
++        `npm policy refuses ${entry.name}@${entry.version}: published less than 7 days ago`
++      )
++    }
++  }
++}
++
++async function mapConcurrent(entries, limit, worker) {
++  let next = 0
++  const runners = Array.from({ length: Math.min(limit, entries.length) }, async () => {
++    while (next < entries.length) {
++      const index = next
++      next += 1
++      await worker(entries[index])
++    }
++  })
++  await Promise.all(runners)
++}
++
++export async function validateLock({ cwd, allowMissingLock = false, npmArgs = [], now = Date.now() }) {
++  const runtime = await loadPinnedNpm({ argv: npmArgs, cwd })
++  const lockPath = path.join(cwd, 'package-lock.json')
++  if (!(await exists(lockPath))) {
++    if (allowMissingLock) return { count: 0, missing: true }
++    throw new Error(`npm policy requires ${lockPath}`)
++  }
++
++  const policy = JSON.parse(await readFile(POLICY_PATH, 'utf8'))
++  validatePolicyRecord(policy)
++  let tree
++  try {
++    tree = await new runtime.Arborist({ ...runtime.config.flat, path: cwd }).loadVirtual()
++  } catch (error) {
++    throw new Error(`npm policy could not load package-lock.json: ${error.message}`)
++  }
++  validateDeclaredSources(tree, runtime.npa, cwd)
++
++  const byName = new Map()
++  let count = 0
++  for (const node of tree.inventory.values()) {
++    if (node.isRoot) continue
++    const identity = lockedIdentity(node, runtime.npa, cwd)
++    const entries = byName.get(identity.name) ?? []
++    if (!entries.some(entry =>
++      entry.version === identity.version &&
++      entry.integrity === identity.integrity &&
++      entry.resolved === identity.resolved
++    )) {
++      entries.push(identity)
++      count += 1
++    }
++    byName.set(identity.name, entries)
++  }
++
++  const cutoff = now - MINIMUM_AGE_DAYS * DAY_MS
++  await mapConcurrent([...byName.entries()], 6, async ([name, locked]) => {
++    await validatePackage({
++      name,
++      locked,
++      pacote: runtime.pacote,
++      ssri: runtime.ssri,
++      config: runtime.config,
++      cutoff,
++      now,
++      admissions: policy.existingPinAdmissions,
++    })
++  })
++  return { count, missing: false }
++}
++
++async function main() {
++  const options = parseArgs(process.argv.slice(2))
++  const result = await validateLock(options)
++  if (!result.missing) console.log(`npm policy accepted ${result.count} locked package identities`)
++}
++
++if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
++  main().catch(error => {
++    console.error(error.message)
++    process.exitCode = 1
++  })
++}
+diff --git a/scripts/npm-policy-selftest.mjs b/scripts/npm-policy-selftest.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..170795fd0d2478da31d3a1f2cc713a6c1df1ab98
+--- /dev/null
++++ b/scripts/npm-policy-selftest.mjs
+@@ -0,0 +1,717 @@
++import assert from 'node:assert/strict'
++import { createHash } from 'node:crypto'
++import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
++import http from 'node:http'
++import { createRequire } from 'node:module'
++import os from 'node:os'
++import path from 'node:path'
++import { fileURLToPath } from 'node:url'
++import { spawn } from 'node:child_process'
++
++import { validateLock } from './npm-lock-policy.mjs'
++
++const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
++const npmCli = process.env.npm_execpath
++if (!npmCli) throw new Error('run this self-test with npm_execpath set to npm 12.0.2')
++const npmRoot = path.dirname(path.dirname(await realpath(npmCli)))
++const requireFromNpm = createRequire(path.join(npmRoot, 'package.json'))
++const tar = requireFromNpm('tar')
++const root = await mkdtemp(path.join(os.tmpdir(), 'mill-npm-policy-'))
++
++const tarballs = new Map([
++  ['old', Buffer.from('H4sIAAAAAAAC/+3SQQrCMBCF4RxFZm1jIm0W3iZIlGiblrQVQby7UReCaxHB/9u84c1iNjP47dHvw2p4pj6MfVIfZgpX148s3tOYpnnN995at3ZqYdQXzOPkczmv/tNFku+CbKSLbVuVD6h28TzNOchSTiGPsU9labXRRq4KAAAAAAAAAAAAAAAAAPArbm9HK1MAKAAA', 'base64')],
++  ['fresh', Buffer.from('H4sIAAAAAAAC/+3SQQrCMBCF4RxFsrZxWtosvE2QKNU2LUlbBPHuRl0IrkUE/2/zhjeL2czodid38JvxmeaYhqA+TDJb14/M3lOkaV7zvS9LW1m1EvUFc5pczOfVf7ro4Hqvt7pvu67IH1Ds2/M0R6/XevExtUPIy8qIEX1VAAAAAAAAAAAAAAAAAIBfcQMB9s48ACgAAA==', 'base64')],
++  ['script-2.3.3', Buffer.from('H4sIAAAAAAAC/+3TTWrDMBAFYK17iqCNUkj9E7ta+AC9QE4gnHFQ68qu5KQY47tn6pgEsskmhJa+bzPSSCCQ9FpTfpgdxe2pRu+hceLOEqbzfKrsuiZp+noeT/001etMLBLxAPvQGc/Hi/9pkM58kixkFehArgtyJQ/kg20cN9dRFmXcCaW3La8Vg7SOL6yuedE1W1rMU/43chwF/DVz7uPLO97/jFv5T7S+zn+Wa+T/ETx97a2npfpJc1EF9Rx9e9vRm61p07tyqeaf8eKNUyvVE295Qm4AAAAAAAAAAAAAAAAAAAAAfosjjNamiQAoAAA=', 'base64')],
++  ['script-2.3.4', Buffer.from('H4sIAAAAAAAC/+3TTWrDMBAFYK17iqCNUkj8E7ta+AC5QE4g3HFR68qO5CQY47tn6poEsukmhJa+bzPSSCCQ9FpTfpg3itvvGr2Hxok7S5jO86my25qk6ctlPPXTVG8ysUjEAxxCZzwfL/6nQTrzSbKQVaAjuS7IlTySD7Zx3NxEWZRzJ5TetrxWDNI6vrC65kXXvNJinvK/keMo4K+Zcx9f3/H+Z/yU/0Tr2/xnuUb+H8HT/mA9LdVXmosqqOfo5G1HW1vTrnflUs0/Y+2NUyvVE295Qm4AAAAAAAAAAAAAAAAAAAAAfoszMSnleQAoAAA=', 'base64')],
++])
++
++const integrity = data => `sha512-${createHash('sha512').update(data).digest('base64')}`
++const observed = {
++  metadata: 0,
++  tarball: 0,
++  paths: new Map(),
++  trackConcurrency: false,
++  activeMetadata: 0,
++  maxMetadata: 0,
++}
++let registry
++let sourceSpecs
++
++async function addTarball(key, manifest, files = {}) {
++  const fixture = await mkdtemp(path.join(root, 'tarball-'))
++  const packageRoot = path.join(fixture, 'package')
++  await mkdir(packageRoot)
++  await writeFile(path.join(packageRoot, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`)
++  for (const [relative, content] of Object.entries(files)) {
++    const target = path.join(packageRoot, relative)
++    await mkdir(path.dirname(target), { recursive: true })
++    await writeFile(target, content)
++  }
++  const archive = path.join(fixture, `${key}.tgz`)
++  await tar.c({ cwd: fixture, file: archive, gzip: true }, ['package'])
++  tarballs.set(key, await readFile(archive))
++  await rm(fixture, { recursive: true, force: true })
++}
++
++const oldTime = now => new Date(now - 30 * 86400000).toISOString()
++
++function oneVersionPackument(name, key, additions = {}) {
++  const version = '1.0.0'
++  return {
++    name,
++    'dist-tags': { latest: version },
++    versions: { [version]: { ...artifact(key, name, version), ...additions } },
++    time: { [version]: oldTime(Date.now()) },
++  }
++}
++
++const artifact = (key, name, version) => ({
++  name,
++  version,
++  dist: {
++    tarball: key.startsWith('script-')
++      ? `${registry}/fsevents/-/fsevents-${version}.tgz`
++      : `${registry}/tarballs/${key}.tgz`,
++    integrity: integrity(tarballs.get(key)),
++  },
++})
++
++function packument(name) {
++  const now = Date.now()
++  if (name === 'mill-age-fixture') {
++    return {
++      name,
++      'dist-tags': { latest: '2.0.0' },
++      versions: {
++        '1.0.0': artifact('old', name, '1.0.0'),
++        '2.0.0': artifact('fresh', name, '2.0.0'),
++      },
++      time: {
++        '1.0.0': new Date(now - 30 * 86400000).toISOString(),
++        '2.0.0': new Date(now - 3600000).toISOString(),
++      },
++    }
++  }
++  if (name === '@scope/mill-age-fixture') {
++    return {
++      name,
++      'dist-tags': { latest: '1.0.0' },
++      versions: { '1.0.0': artifact('old', name, '1.0.0') },
++      time: { '1.0.0': new Date(now - 30 * 86400000).toISOString() },
++    }
++  }
++  if (name === 'qs') {
++    return {
++      name,
++      'dist-tags': { latest: '1.1.0' },
++      versions: {
++        '1.0.0': artifact('qs-1.0.0', name, '1.0.0'),
++        '1.1.0': artifact('qs-1.1.0', name, '1.1.0'),
++      },
++      time: { '1.0.0': oldTime(now), '1.1.0': oldTime(now) },
++    }
++  }
++  if (name === 'qs-parent') {
++    return oneVersionPackument(name, 'qs-parent', { dependencies: { qs: '^1.0.0' } })
++  }
++  for (const type of ['git', 'file', 'directory', 'remote']) {
++    if (name === `transitive-${type}-parent`) {
++      return oneVersionPackument(name, name, {
++        dependencies: { [`blocked-${type}`]: sourceSpecs[type] },
++      })
++    }
++  }
++  if (name === 'optional-parent') {
++    return oneVersionPackument(name, name, {
++      optionalDependencies: { 'blocked-optional': sourceSpecs.optional },
++    })
++  }
++  if (name === 'optional-registry-parent') {
++    return oneVersionPackument(name, name, {
++      optionalDependencies: { 'optional-registry-child': '1.0.0' },
++    })
++  }
++  if (name === 'optional-registry-child') {
++    return oneVersionPackument(name, name, { os: ['aix'] })
++  }
++  if (name === 'bundled-parent') {
++    return oneVersionPackument(name, name, {
++      dependencies: { 'bundled-child': '1.0.0' },
++      bundleDependencies: ['bundled-child'],
++    })
++  }
++  if (/^concurrency-[1-7]$/.test(name)) {
++    return oneVersionPackument(name, 'old')
++  }
++  if (name === 'missing-date') {
++    return {
++      name,
++      'dist-tags': { latest: '1.0.0' },
++      versions: { '1.0.0': artifact('old', name, '1.0.0') },
++      time: {},
++    }
++  }
++  if (name === 'future-date') {
++    return {
++      name,
++      'dist-tags': { latest: '1.0.0' },
++      versions: { '1.0.0': artifact('old', name, '1.0.0') },
++      time: { '1.0.0': new Date(now + 86400000).toISOString() },
++    }
++  }
++  if (name === 'fsevents') {
++    return {
++      name,
++      'dist-tags': { latest: '2.3.4' },
++      versions: {
++        '2.3.3': artifact('script-2.3.3', name, '2.3.3'),
++        '2.3.4': artifact('script-2.3.4', name, '2.3.4'),
++      },
++      time: {
++        '2.3.3': new Date(now - 30 * 86400000).toISOString(),
++        '2.3.4': new Date(now - 30 * 86400000).toISOString(),
++      },
++    }
++  }
++  if (name === '@wailsio/runtime') {
++    const recorded = 'sha512-mABrIX7npcy6ROXTuyRJdQflqhqeHXBjNKdbYCBKl/d6GJoGVEWeo+LV/LkZpX/FwI+H+0XgJUyMHmJW4R8dDw=='
++    return {
++      name,
++      'dist-tags': { latest: '3.0.0-beta.18' },
++      versions: {
++        '3.0.0-beta.18': {
++          name,
++          version: '3.0.0-beta.18',
++          dist: { tarball: `${registry}/tarballs/wails.tgz`, integrity: recorded },
++        },
++      },
++      time: { '3.0.0-beta.18': '2026-09-08T15:16:40.286Z' },
++    }
++  }
++  return null
++}
++
++const server = http.createServer((request, response) => {
++  const requestPath = new URL(request.url, 'http://registry.invalid').pathname
++  observed.paths.set(requestPath, (observed.paths.get(requestPath) ?? 0) + 1)
++  if (request.url.endsWith('.tgz')) {
++    observed.tarball += 1
++    const basename = path.basename(request.url, '.tgz')
++    const key = basename.startsWith('fsevents-')
++      ? `script-${basename.slice('fsevents-'.length)}`
++      : basename
++    const body = tarballs.get(key)
++    if (!body) {
++      response.writeHead(404).end()
++      return
++    }
++    response.writeHead(200, { 'content-type': 'application/octet-stream' }).end(body)
++    return
++  }
++  observed.metadata += 1
++  if (observed.trackConcurrency) {
++    observed.activeMetadata += 1
++    observed.maxMetadata = Math.max(observed.maxMetadata, observed.activeMetadata)
++  }
++  const respond = () => {
++    const name = decodeURIComponent(request.url.slice(1).split('?')[0])
++    if (name === 'registry-failure') {
++      response.writeHead(500).end('failed')
++    } else {
++      const body = packument(name)
++      if (!body) response.writeHead(404).end()
++      else response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(body))
++    }
++    if (observed.trackConcurrency) observed.activeMetadata -= 1
++  }
++  if (observed.trackConcurrency) setTimeout(respond, 20)
++  else respond()
++})
++
++const listen = () => new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
++const close = () => new Promise(resolve => server.close(resolve))
++const pathCalls = prefix => [...observed.paths.entries()]
++  .filter(([requestPath]) => requestPath.startsWith(prefix))
++  .reduce((total, [, count]) => total + count, 0)
++const run = (executable, args, cwd, env) => new Promise((resolve, reject) => {
++  const child = spawn(executable, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
++  let output = ''
++  child.stdout.on('data', data => { output += data })
++  child.stderr.on('data', data => { output += data })
++  child.once('error', reject)
++  child.once('exit', code => resolve({ code, output }))
++})
++
++function lockEntry(name, version, key, overrides = {}) {
++  return {
++    version,
++    resolved: key.startsWith('script-')
++      ? `${registry}/fsevents/-/fsevents-${version}.tgz`
++      : `${registry}/tarballs/${key}.tgz`,
++    integrity: integrity(tarballs.get(key)),
++    ...overrides,
++    ...(name.startsWith('@') ? { name } : {}),
++  }
++}
++
++async function project(root, label, dependency, entry, extraManifest = {}) {
++  const cwd = path.join(root, label)
++  await mkdir(cwd)
++  const manifest = { name: label, version: '1.0.0', dependencies: dependency, ...extraManifest }
++  await writeFile(path.join(cwd, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`)
++  await writeFile(path.join(cwd, '.npmrc'), 'strict-allow-scripts=true\n')
++  if (entry) {
++    const installName = Object.keys(dependency)[0]
++    const packagePath = `node_modules/${installName}`
++    const lock = {
++      name: label,
++      version: '1.0.0',
++      lockfileVersion: 3,
++      requires: true,
++      packages: {
++        '': { name: label, version: '1.0.0', dependencies: dependency, ...extraManifest },
++        [packagePath]: entry,
++      },
++    }
++    await writeFile(path.join(cwd, 'package-lock.json'), `${JSON.stringify(lock, null, 2)}\n`)
++  }
++  return cwd
++}
++
++async function expectPolicy(cwd, message, options = {}) {
++  await assert.rejects(() => validateLock({ cwd, ...options }), new RegExp(message))
++}
++
++await listen()
++registry = `http://127.0.0.1:${server.address().port}`
++try {
++  sourceSpecs = {
++  git: `git+${registry}/blocked-git.git`,
++  file: `file:${path.join(root, 'blocked-file.tgz')}`,
++  directory: `file:${path.join(root, 'blocked-directory')}`,
++  remote: `${registry}/blocked-remote.tgz`,
++  optional: `${registry}/blocked-optional.tgz`,
++  }
++  for (const [key, name, version = '1.0.0'] of [
++  ['qs-1.0.0', 'qs'],
++  ['qs-1.1.0', 'qs', '1.1.0'],
++  ['qs-parent', 'qs-parent'],
++  ['transitive-git-parent', 'transitive-git-parent'],
++  ['transitive-file-parent', 'transitive-file-parent'],
++  ['transitive-directory-parent', 'transitive-directory-parent'],
++  ['transitive-remote-parent', 'transitive-remote-parent'],
++  ['optional-parent', 'optional-parent'],
++  ['optional-registry-parent', 'optional-registry-parent'],
++  ]) await addTarball(key, { name, version })
++  await addTarball(
++    'optional-registry-child',
++    { name: 'optional-registry-child', version: '1.0.0', os: ['aix'] }
++  )
++  await addTarball('blocked-file', { name: 'blocked-file', version: '1.0.0' })
++  await writeFile(path.join(root, 'blocked-file.tgz'), tarballs.get('blocked-file'))
++  await mkdir(path.join(root, 'blocked-directory'))
++  await writeFile(
++    path.join(root, 'blocked-directory/package.json'),
++    `${JSON.stringify({ name: 'blocked-directory', version: '1.0.0' })}\n`
++  )
++  await addTarball(
++  'bundled-parent',
++  {
++    name: 'bundled-parent',
++    version: '1.0.0',
++    dependencies: { 'bundled-child': '1.0.0' },
++    bundleDependencies: ['bundled-child'],
++  },
++  {
++    'node_modules/bundled-child/package.json': `${JSON.stringify({
++      name: 'bundled-child',
++      version: '1.0.0',
++      scripts: { install: 'node -e "require(\\\'node:fs\\\').writeFileSync(\\\'install-ran\\\', \\\'yes\\\')"' },
++    })}\n`,
++  }
++  )
++  const env = {
++    ...process.env,
++    npm_execpath: npmCli,
++    npm_config_registry: registry,
++    npm_config_cache: path.join(root, 'cache'),
++    npm_config_audit: 'false',
++    npm_config_fund: 'false',
++  }
++  Object.assign(process.env, env)
++
++  const old = await project(root, 'old', { 'mill-age-fixture': '1.0.0' }, lockEntry('mill-age-fixture', '1.0.0', 'old'))
++  assert.equal((await validateLock({ cwd: old })).count, 1)
++
++  const concurrencyNames = Array.from({ length: 7 }, (_, index) => `concurrency-${index + 1}`)
++  const concurrencyDependencies = Object.fromEntries(concurrencyNames.map(name => [name, '1.0.0']))
++  const concurrency = await project(root, 'concurrency', concurrencyDependencies)
++  const concurrencyLock = {
++    name: 'concurrency',
++    version: '1.0.0',
++    lockfileVersion: 3,
++    requires: true,
++    packages: {
++      '': { name: 'concurrency', version: '1.0.0', dependencies: concurrencyDependencies },
++      ...Object.fromEntries(concurrencyNames.map(name => [
++        `node_modules/${name}`,
++        lockEntry(name, '1.0.0', 'old'),
++      ])),
++    },
++  }
++  await writeFile(path.join(concurrency, 'package-lock.json'), `${JSON.stringify(concurrencyLock, null, 2)}\n`)
++  observed.trackConcurrency = true
++  observed.maxMetadata = 0
++  assert.equal((await validateLock({ cwd: concurrency })).count, 7)
++  observed.trackConcurrency = false
++  assert.equal(observed.activeMetadata, 0)
++  assert.equal(observed.maxMetadata, 6)
++
++  const fresh = await project(root, 'fresh', { 'mill-age-fixture': '2.0.0' }, lockEntry('mill-age-fixture', '2.0.0', 'fresh'))
++  await expectPolicy(fresh, 'published less than 7 days')
++  const beforeFreshCi = observed.tarball
++  const freshCi = await run(process.execPath, [path.join(repoRoot, 'scripts/npm-install.mjs'), 'ci', '--cwd', fresh, '--', '--ignore-scripts'], fresh, env)
++  assert.notEqual(freshCi.code, 0)
++  assert.equal(observed.tarball, beforeFreshCi)
++
++  const directFresh = await project(
++    root,
++    'direct-fresh',
++    { 'mill-age-fixture': '2.0.0' },
++    lockEntry('mill-age-fixture', '2.0.0', 'fresh'),
++    { scripts: { preinstall: `node ${path.join(repoRoot, 'scripts/npm-lock-policy.mjs')} --cwd . --allow-missing-lock` } }
++  )
++  const beforeDirectFresh = observed.tarball
++  const directFreshCi = await run(process.execPath, [npmCli, 'ci', `--prefix=${directFresh}`, '--min-release-age=7'], directFresh, env)
++  assert.notEqual(directFreshCi.code, 0)
++  assert.equal(observed.tarball, beforeDirectFresh)
++
++  const oldCi = await run(process.execPath, [path.join(repoRoot, 'scripts/npm-install.mjs'), 'ci', '--cwd', old, '--', '--ignore-scripts'], old, env)
++  assert.equal(oldCi.code, 0, oldCi.output)
++  assert.equal(JSON.parse(await readFile(path.join(old, 'node_modules/mill-age-fixture/package.json'))).version, '1.0.0')
++
++  const targetEnv = await project(root, 'target-env', { 'mill-age-fixture': '1.0.0' }, lockEntry('mill-age-fixture', '1.0.0', 'old'))
++  const outsideTarget = path.join(root, 'outside-target')
++  const hostileTargetEnv = {
++    ...env,
++    npm_config_global: 'true',
++    npm_config_location: 'global',
++    npm_config_prefix: outsideTarget,
++  }
++  const beforeTargetEnv = observed.metadata
++  const targetEnvCi = await run(process.execPath, [path.join(repoRoot, 'scripts/npm-install.mjs'), 'ci', '--cwd', targetEnv, '--', '--ignore-scripts'], targetEnv, hostileTargetEnv)
++  assert.notEqual(targetEnvCi.code, 0)
++  assert.equal(observed.metadata, beforeTargetEnv)
++  await assert.rejects(() => access(path.join(targetEnv, 'node_modules/mill-age-fixture/package.json')))
++  await assert.rejects(() => access(path.join(outsideTarget, 'lib/node_modules/mill-age-fixture/package.json')))
++
++  for (const forbidden of [
++    ['--strict-allow-scripts=false'],
++    ['--no-strict-allow-scripts'],
++    ['--before', new Date(Date.now() + 86400000).toISOString()],
++    ['--no-min-release-age'],
++    ['--prefix', root],
++    [`-C${root}`],
++    ['--global'],
++    ['-Lglobal'],
++    ['-w', 'elsewhere'],
++    ['--allow-directory=all'],
++    ['--allow-file=all'],
++    ['--allow-git=all'],
++    ['--allow-remote=all'],
++    ['--no-save'],
++  ]) {
++    const beforeOverride = observed.metadata
++    const result = await run(
++      process.execPath,
++      [path.join(repoRoot, 'scripts/npm-install.mjs'), 'ci', '--cwd', old, '--', ...forbidden],
++      old,
++      env
++    )
++    assert.notEqual(result.code, 0)
++    assert.equal(observed.metadata, beforeOverride)
++  }
++
++  const wildcard = await project(root, 'wildcard', { 'mill-age-fixture': '*' })
++  const oldResolution = await run(process.execPath, [path.join(repoRoot, 'scripts/npm-install.mjs'), 'install', '--cwd', wildcard, '--', '--package-lock-only', '--ignore-scripts'], wildcard, env)
++  assert.equal(oldResolution.code, 0, oldResolution.output)
++  assert.equal(JSON.parse(await readFile(path.join(wildcard, 'package-lock.json'))).packages['node_modules/mill-age-fixture'].version, '1.0.0')
++  await assert.rejects(() => access(path.join(wildcard, 'node_modules/mill-age-fixture/package.json')))
++
++  const hostilePolicyEnv = {
++    ...env,
++    npm_config_allow_directory: 'all',
++    npm_config_allow_file: 'all',
++    npm_config_allow_git: 'all',
++    npm_config_allow_remote: 'all',
++    npm_config_package_lock_only: 'true',
++    npm_config_ignore_scripts: 'true',
++    npm_config_strict_allow_scripts: 'false',
++    npm_config_dangerously_allow_all_scripts: 'true',
++  }
++  const normalInstall = await project(root, 'normal-install', { 'mill-age-fixture': '1.0.0' })
++  const installed = await run(process.execPath, [path.join(repoRoot, 'scripts/npm-install.mjs'), 'install', '--cwd', normalInstall], normalInstall, hostilePolicyEnv)
++  assert.equal(installed.code, 0, installed.output)
++  assert.equal(JSON.parse(await readFile(path.join(normalInstall, 'node_modules/mill-age-fixture/package.json'))).version, '1.0.0')
++
++  const directNonRegistry = await project(root, 'direct-nonregistry', { blocked: sourceSpecs.git })
++  const beforeDirectSource = pathCalls('/blocked-git.git')
++  const directNonRegistryInstall = await run(
++    process.execPath,
++    [path.join(repoRoot, 'scripts/npm-install.mjs'), 'install', '--cwd', directNonRegistry, '--', '--package-lock-only'],
++    directNonRegistry,
++    env
++  )
++  assert.notEqual(directNonRegistryInstall.code, 0)
++  assert.match(directNonRegistryInstall.output, /refuses non-registry dependencies entry blocked/)
++  assert.equal(pathCalls('/blocked-git.git'), beforeDirectSource)
++
++  const forwardedNonRegistry = await project(root, 'forwarded-nonregistry', {})
++  const beforeForwardedSource = pathCalls('/blocked-remote.tgz')
++  const forwardedNonRegistryInstall = await run(
++    process.execPath,
++    [path.join(repoRoot, 'scripts/npm-install.mjs'), 'install', '--cwd', forwardedNonRegistry, '--', sourceSpecs.remote],
++    forwardedNonRegistry,
++    env
++  )
++  assert.notEqual(forwardedNonRegistryInstall.code, 0)
++  assert.match(forwardedNonRegistryInstall.output, /refuses a non-registry package argument/)
++  assert.equal(pathCalls('/blocked-remote.tgz'), beforeForwardedSource)
++
++  for (const type of ['git', 'file', 'directory', 'remote']) {
++    const cwd = await project(root, `transitive-${type}`, { [`transitive-${type}-parent`]: '1.0.0' })
++    const sourcePrefix = type === 'git' ? '/blocked-git.git' : `/blocked-${type}`
++    const beforeSource = pathCalls(sourcePrefix)
++    const result = await run(
++      process.execPath,
++      [path.join(repoRoot, 'scripts/npm-install.mjs'), 'install', '--cwd', cwd, '--', '--package-lock-only'],
++      cwd,
++      env
++    )
++    assert.notEqual(result.code, 0)
++    assert.match(result.output, new RegExp(`packages of type "${type}" have been disabled`))
++    assert.equal(pathCalls(sourcePrefix), beforeSource)
++    await assert.rejects(() => access(path.join(cwd, `node_modules/transitive-${type}-parent/package.json`)))
++  }
++
++  const optional = await project(root, 'optional-source', { 'optional-parent': '1.0.0' })
++  await mkdir(path.join(optional, 'node_modules'))
++  await writeFile(path.join(optional, 'node_modules/existing-sentinel'), 'preserve')
++  const beforeOptionalSource = pathCalls('/blocked-optional.tgz')
++  const optionalInstall = await run(
++    process.execPath,
++    [path.join(repoRoot, 'scripts/npm-install.mjs'), 'install', '--cwd', optional],
++    optional,
++    hostilePolicyEnv
++  )
++  assert.notEqual(optionalInstall.code, 0)
++  assert.match(optionalInstall.output, /unsupported dependency source: blocked-optional/)
++  assert.equal(pathCalls('/blocked-optional.tgz'), beforeOptionalSource)
++  assert.equal(await readFile(path.join(optional, 'node_modules/existing-sentinel'), 'utf8'), 'preserve')
++  await assert.rejects(() => access(path.join(optional, 'node_modules/optional-parent/package.json')))
++  await assert.rejects(() => access(path.join(optional, 'node_modules/blocked-optional/package.json')))
++
++  const optionalRegistry = await project(
++    root,
++    'optional-registry',
++    { 'optional-registry-parent': '1.0.0' }
++  )
++  const optionalRegistryInstall = await run(
++    process.execPath,
++    [path.join(repoRoot, 'scripts/npm-install.mjs'), 'install', '--cwd', optionalRegistry],
++    optionalRegistry,
++    env
++  )
++  assert.equal(optionalRegistryInstall.code, 0, optionalRegistryInstall.output)
++  assert.equal(
++    JSON.parse(await readFile(path.join(optionalRegistry, 'node_modules/optional-registry-parent/package.json'))).version,
++    '1.0.0'
++  )
++  await assert.rejects(() => access(path.join(optionalRegistry, 'node_modules/optional-registry-child/package.json')))
++
++  const bundled = await project(root, 'bundled-source', { 'bundled-parent': '1.0.0' })
++  await mkdir(path.join(bundled, 'node_modules'))
++  await writeFile(path.join(bundled, 'node_modules/existing-sentinel'), 'preserve')
++  const bundledInstall = await run(
++    process.execPath,
++    [path.join(repoRoot, 'scripts/npm-install.mjs'), 'install', '--cwd', bundled],
++    bundled,
++    env
++  )
++  assert.notEqual(bundledInstall.code, 0)
++  assert.match(bundledInstall.output, /unsupported dependency source/)
++  assert.equal(await readFile(path.join(bundled, 'node_modules/existing-sentinel'), 'utf8'), 'preserve')
++  await assert.rejects(() => access(path.join(bundled, 'node_modules/bundled-parent/package.json')))
++
++  const exactFresh = await project(root, 'exact-fresh', { 'mill-age-fixture': '2.0.0' })
++  const freshResolution = await run(process.execPath, [path.join(repoRoot, 'scripts/npm-install.mjs'), 'install', '--cwd', exactFresh, '--', '--package-lock-only', '--ignore-scripts'], exactFresh, env)
++  assert.notEqual(freshResolution.code, 0)
++
++  const qsUpdate = await project(root, 'qs-update', { 'qs-parent': '1.0.0' })
++  const qsLock = {
++    name: 'qs-update',
++    version: '1.0.0',
++    lockfileVersion: 3,
++    requires: true,
++    packages: {
++      '': { name: 'qs-update', version: '1.0.0', dependencies: { 'qs-parent': '1.0.0' } },
++      'node_modules/qs-parent': lockEntry('qs-parent', '1.0.0', 'qs-parent', { dependencies: { qs: '^1.0.0' } }),
++      'node_modules/qs': lockEntry('qs', '1.0.0', 'qs-1.0.0'),
++    },
++  }
++  await writeFile(path.join(qsUpdate, 'package-lock.json'), `${JSON.stringify(qsLock, null, 2)}\n`)
++  const updated = await run(
++    process.execPath,
++    [path.join(repoRoot, 'scripts/npm-install.mjs'), 'update', '--cwd', qsUpdate, '--', 'qs', '--package-lock-only'],
++    qsUpdate,
++    env
++  )
++  assert.equal(updated.code, 0, updated.output)
++  const updatedLock = JSON.parse(await readFile(path.join(qsUpdate, 'package-lock.json')))
++  assert.equal(updatedLock.packages['node_modules/qs'].version, '1.1.0')
++  assert.equal(updatedLock.packages[''].dependencies.qs, undefined)
++  await assert.rejects(() => access(path.join(qsUpdate, 'node_modules/qs/package.json')))
++
++  const alias = await project(
++    root,
++    'alias',
++    { alias: 'npm:@scope/mill-age-fixture@1.0.0' },
++    lockEntry('@scope/mill-age-fixture', '1.0.0', 'old')
++  )
++  assert.equal((await validateLock({ cwd: alias })).count, 1)
++
++  const unknown = await project(root, 'unknown', { 'mill-age-fixture': '9.0.0' }, lockEntry('mill-age-fixture', '9.0.0', 'old'))
++  await expectPolicy(unknown, 'no matching registry version')
++
++  const missingDate = await project(root, 'missing-date', { 'missing-date': '1.0.0' }, lockEntry('missing-date', '1.0.0', 'old'))
++  await expectPolicy(missingDate, 'no valid publication time')
++
++  const futureDate = await project(root, 'future-date', { 'future-date': '1.0.0' }, lockEntry('future-date', '1.0.0', 'old'))
++  await expectPolicy(futureDate, 'future publication time')
++
++  const unsupported = await project(root, 'unsupported', { gitpkg: 'git+https://example.invalid/repo.git#main' }, {
++    version: '1.0.0',
++    resolved: 'git+https://example.invalid/repo.git#0123456789abcdef',
++  })
++  await expectPolicy(unsupported, 'unsupported dependency source')
++
++  const badIntegrity = await project(root, 'bad-integrity', { 'mill-age-fixture': '1.0.0' }, lockEntry('mill-age-fixture', '1.0.0', 'old', { integrity: integrity(tarballs.get('fresh')) }))
++  await expectPolicy(badIntegrity, 'integrity mismatch')
++
++  const badSource = await project(root, 'bad-source', { 'mill-age-fixture': '1.0.0' }, lockEntry('mill-age-fixture', '1.0.0', 'old', { resolved: `${registry}/tarballs/other.tgz` }))
++  await expectPolicy(badSource, 'artifact identity mismatch')
++
++  const failedRegistry = await project(root, 'registry-failure', { 'registry-failure': '1.0.0' }, lockEntry('registry-failure', '1.0.0', 'old'))
++  await expectPolicy(failedRegistry, 'could not read registry metadata')
++
++  const malformed = await project(root, 'malformed', {})
++  await writeFile(path.join(malformed, 'package-lock.json'), '{')
++  await expectPolicy(malformed, 'could not load package-lock')
++  const missing = await project(root, 'missing', {})
++  await expectPolicy(missing, 'requires .*package-lock.json')
++
++  const exceptionIntegrity = 'sha512-mABrIX7npcy6ROXTuyRJdQflqhqeHXBjNKdbYCBKl/d6GJoGVEWeo+LV/LkZpX/FwI+H+0XgJUyMHmJW4R8dDw=='
++  const exception = await project(root, 'exception', { '@wailsio/runtime': '3.0.0-beta.18' }, {
++    name: '@wailsio/runtime',
++    version: '3.0.0-beta.18',
++    resolved: `${registry}/tarballs/wails.tgz`,
++    integrity: exceptionIntegrity,
++  })
++  const rolloutNow = Date.parse('2026-09-10T12:00:00.000Z')
++  assert.equal((await validateLock({ cwd: exception, now: rolloutNow })).count, 1)
++  const exceptionLock = JSON.parse(await readFile(path.join(exception, 'package-lock.json')))
++  exceptionLock.packages['node_modules/@wailsio/runtime'].integrity = integrity(tarballs.get('old'))
++  await writeFile(path.join(exception, 'package-lock.json'), JSON.stringify(exceptionLock))
++  await expectPolicy(exception, 'integrity mismatch', { now: rolloutNow })
++
++  for (const version of ['2.3.3', '2.3.4']) {
++    const key = `script-${version}`
++    const cwd = await project(
++      root,
++      `script-${version.replaceAll('.', '-')}`,
++      { fsevents: version },
++      lockEntry('fsevents', version, key, { hasInstallScript: true }),
++      { allowScripts: { 'fsevents@2.3.3': true } }
++    )
++    if (version === '2.3.4') {
++      await writeFile(path.join(cwd, '.npmrc'), 'strict-allow-scripts=false\n')
++    }
++    const scriptEnv = version === '2.3.4'
++      ? {
++          ...env,
++          npm_config_dangerously_allow_all_scripts: 'true',
++        }
++      : env
++    const result = await run(process.execPath, [path.join(repoRoot, 'scripts/npm-install.mjs'), 'ci', '--cwd', cwd], cwd, scriptEnv)
++    if (version === '2.3.3') {
++      assert.equal(result.code, 0, result.output)
++      assert.equal(await readFile(path.join(cwd, 'node_modules/fsevents/install-ran'), 'utf8'), 'yes')
++    } else {
++      assert.notEqual(result.code, 0)
++    }
++  }
++
++  for (const source of ['environment', 'project']) {
++    const cwd = await project(
++      root,
++      `script-disabled-${source}`,
++      { fsevents: '2.3.3' },
++      lockEntry('fsevents', '2.3.3', 'script-2.3.3', { hasInstallScript: true }),
++      { allowScripts: { 'fsevents@2.3.3': true } }
++    )
++    if (source === 'project') {
++      await writeFile(path.join(cwd, '.npmrc'), 'strict-allow-scripts=true\nignore-scripts=true\n')
++    }
++    const scriptDisabledEnv = source === 'environment'
++      ? { ...env, npm_config_ignore_scripts: 'true' }
++      : env
++    const result = await run(
++      process.execPath,
++      [path.join(repoRoot, 'scripts/npm-install.mjs'), 'ci', '--cwd', cwd],
++      cwd,
++      scriptDisabledEnv
++    )
++    assert.equal(result.code, 0, result.output)
++    assert.equal(JSON.parse(await readFile(path.join(cwd, 'node_modules/fsevents/package.json'))).version, '2.3.3')
++    await assert.rejects(() => access(path.join(cwd, 'node_modules/fsevents/install-ran')))
++  }
++
++  const beforeWrongRuntime = observed.metadata
++  const runtimeModule = new URL('./npm-runtime.mjs', import.meta.url).href
++  const wrongRuntimeSource = [
++    "Object.defineProperty(process.versions, 'node', { value: '0.0.0' })",
++    `const { loadPinnedNpm } = await import(${JSON.stringify(runtimeModule)})`,
++    'await loadPinnedNpm()',
++  ].join(';')
++  const wrongRuntime = await run(process.execPath, ['--input-type=module', '--eval', wrongRuntimeSource], old, env)
++  assert.notEqual(wrongRuntime.code, 0)
++  assert.equal(observed.metadata, beforeWrongRuntime)
++
++  console.log('npm-policy-selftest: OK')
++  for (const checked of [
++    'old and fresh native resolution',
++    'at most six concurrent distinct registry-name metadata requests',
++    'fresh locked ci refusal before tarball download under ignore-scripts',
++    'frontend-style preinstall refusal before direct npm ci tarball download',
++    'old locked ci installation',
++    'hostile target environment confinement plus strict-script, release-cutoff, source-control, and target-argument refusal',
++    'two-phase old registry resolution, resulting-lock validation, and guarded ci materialization',
++    'direct and forwarded non-registry source refusal before acquisition',
++    'required transitive git, file, directory, and URL refusal before source acquisition',
++    'forbidden optional source refusal with zero source calls and ordinary optional registry pruning',
++    'unsupported bundled dependency refusal before materialization with existing node_modules preserved',
++    'bounded transitive qs update with package-lock-only and no direct dependency or materialization',
++    'scoped alias registry identity',
++    'unknown version, missing date, future date, and unsupported source refusal',
++    'integrity and artifact identity mismatch refusal',
++    'malformed and missing ci lock refusal',
++    'registry transport failure refusal',
++    'exact rollout admission and changed-integrity refusal',
++    'exact fsevents script approval and changed-version refusal even under permissive project and environment config',
++    'inherited environment and project ignore-scripts intent preserved for an approved lifecycle script',
++    'wrong Node refusal before registry metadata',
++  ]) console.log(`npm-policy-selftest: checked ${checked}`)
++} finally {
++  await close()
++  await rm(root, { recursive: true, force: true })
++}
+diff --git a/scripts/npm-policy.json b/scripts/npm-policy.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..a0571b4586f6f2365c7f83ef5943386e9b953712
+--- /dev/null
++++ b/scripts/npm-policy.json
+@@ -0,0 +1,25 @@
++{
++  "minimumAgeDays": 7,
++  "baselineCommit": "2fac32290622c94b9a0d8d569e8f5a3a6352ee3b",
++  "existingPinAdmissions": [
++    {"name":"@codemirror/state","version":"6.7.4","published":"2026-09-04T15:37:51.053Z","integrity":"sha512-QhQIVRY+xHZDxwOSFrJ1eUMapJBUID3IdeAjf7dHO7zBUzSkyooHiodnalz5MG3iHzwixKMlAAyn7244y537EA=="},
++    {"name":"@codemirror/view","version":"6.43.11","published":"2026-09-03T12:58:12.136Z","integrity":"sha512-2+esucbQX6wB2JYi1eDvdCPFTA31BN8oSy6xCmk3G6CloV11yOvEjYk+gH7kLrP0MuHG94E8WDhjs5oMiu3+Wg=="},
++    {"name":"@eslint/plugin-kit","version":"0.7.3","published":"2026-09-03T18:10:03.592Z","integrity":"sha512-IkO+/KEUvwbVpiURZg+P7zF74z5Jxe0UgJxVni+RtoHQ6IZieXaO02kmadomap/q+l6bc/jdPGGqTjhuZnuz1Q=="},
++    {"name":"@playwright/test","version":"1.63.0","published":"2026-09-04T22:44:00.304Z","integrity":"sha512-oxMK4vllB9RK5NQ2l1pq1IfOf2AvnEuj/vYGDj0H2nMtmtZpKtCwt/l00GEO6xjGfpBNAvjovvYdCm50dRQkpQ=="},
++    {"name":"@primer/react","version":"38.38.0","published":"2026-09-03T16:31:47.286Z","integrity":"sha512-TVF4c45iwZsjZf8uINyxXL3PY9t7R/uLi/F8GY/bNi1pTtdgjsoJA19aov/wqo5W54cQdN8P8hjoiL1NnQ+AxQ=="},
++    {"name":"@types/react-dom","version":"19.2.7","published":"2026-09-03T11:04:47.516Z","integrity":"sha512-I8bPpDLcHBv1qiIiXDCy71Rt8eQDKJP0sMSWJphDdAcdqiJ1sGpZamavoEIRZmYzjia9LuEb2HlYdDpmoENpvQ=="},
++    {"name":"@vitest/coverage-v8","version":"5.0.0","published":"2026-09-03T12:21:54.737Z","integrity":"sha512-toMg6PZGCIa/lQNCDoASrfb1ly4hsUKXFtFYC9kD4t78o5Y6LyNJU7AENt8eHPr3quYdxaxK7hj2mnbFfUk9NA=="},
++    {"name":"@vitest/mocker","version":"5.0.0","published":"2026-09-03T12:23:33.862Z","integrity":"sha512-66PGTMIiVJP3t4a5yxU9qPtf7MdTBs8jmToMvy+HVflB3Yy13WJZTtPePdvU+wjRV02SKK5doLbSA6o9pwOmiA=="},
++    {"name":"@vitest/spy","version":"5.0.0","published":"2026-09-03T12:24:07.876Z","integrity":"sha512-uy+luWBAPw9XfthoHi5AkfHUnuPYEESjl0p/r+meoBnU8bxg5GDQ3Ey8MjcJ6sqahkL4PFyrvfMJJBw7LbU06g=="},
++    {"name":"@wailsio/runtime","version":"3.0.0-beta.18","published":"2026-09-08T15:16:40.286Z","integrity":"sha512-mABrIX7npcy6ROXTuyRJdQflqhqeHXBjNKdbYCBKl/d6GJoGVEWeo+LV/LkZpX/FwI+H+0XgJUyMHmJW4R8dDw=="},
++    {"name":"bidi-js","version":"1.1.0","published":"2026-09-06T19:52:03.767Z","integrity":"sha512-fX1Onk0tdVPC7obPWB5EbJ1z7NVhLq4m2xZLq2YXBkxzMXIGRpNMU88n0EPgWseKl12J7zXs7qrDxPK4sRs2fg=="},
++    {"name":"eslint","version":"10.10.0","published":"2026-09-04T14:34:21.799Z","integrity":"sha512-NPXn6r5zl4uET1DAVPaOwzX3rut4c0wcmw3dWJAfOsTM5+TogXo0DDjz8pwm/hL8cyVNpHqeK4JpN0NjnyFFNw=="},
++    {"name":"hono","version":"4.13.7","published":"2026-09-04T19:18:07.204Z","integrity":"sha512-c8/gF9ac8Y78/agExVocyLevgR+JlpNB444Py0FSX8pJoPdYUfUzRcXtYEYGwt6l19qIlVZPN5Mfsw9jFShmQQ=="},
++    {"name":"i18next","version":"26.4.2","published":"2026-09-03T19:31:13.307Z","integrity":"sha512-RX+R0VLg13IbvRuJSxnqykUFS9vQZTl8wYpWPCIUDWVrSGjsQywB5Y+pjzrkboxGAuYfJZVH1InFTdgBdxq6ug=="},
++    {"name":"playwright","version":"1.63.0","published":"2026-09-04T22:45:21.732Z","integrity":"sha512-+7ziBLidS4NaNCdt57SUDT+wYmmd5fmiQejUic/kb+YsYSCPyOOE9sebzMjNmQrsnNpDJqd4WHvV/8lfKfUDUg=="},
++    {"name":"playwright-core","version":"1.63.0","published":"2026-09-04T22:43:09.102Z","integrity":"sha512-rYCsBF/M5HjUch52bbtVONEFjv6Xu8sm8h72dNlR5bzIE1fvC/bxgspzkjSfU+MweEMmPM8KJebG6nnyxo5mCg=="},
++    {"name":"react-resizable-panels","version":"4.12.4","published":"2026-09-06T12:58:03.537Z","integrity":"sha512-SOsSj4e9U7vxL15MbgTfl35IO4vxSW4Xb0b1gtJVbRPWv7FOezcgOA00Mi0jP8XqC3y7jOQxpsGs/9zLKHPitA=="},
++    {"name":"undici","version":"8.10.2","published":"2026-09-04T14:00:54.766Z","integrity":"sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ=="},
++    {"name":"vitest","version":"5.0.0","published":"2026-09-03T12:24:30.312Z","integrity":"sha512-gpsMNoRhMjMktVxPtstOH4/PJuPyovVaMDr4oDilXaGH1EcqM2OE96SoHT2VIQ6fTGtTjqmHDrEu2X9RQiXf8Q=="}
++  ]
++}
+diff --git a/scripts/npm-runtime.mjs b/scripts/npm-runtime.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..b7b66013a7cd6202844835511a062e9423b99935
+--- /dev/null
++++ b/scripts/npm-runtime.mjs
+@@ -0,0 +1,76 @@
++import { realpath, readFile } from 'node:fs/promises'
++import { createRequire } from 'node:module'
++import path from 'node:path'
++
++export const EXPECTED_NODE_VERSION = '24.21.0'
++export const EXPECTED_NPM_VERSION = '12.0.2'
++
++const EXPECTED_PACKAGES = new Map([
++  ['@npmcli/arborist', '10.0.2'],
++  ['@npmcli/config', '11.0.1'],
++  ['npm-package-arg', '14.0.0'],
++  ['pacote', '22.0.0'],
++])
++
++const readJSON = async file => JSON.parse(await readFile(file, 'utf8'))
++
++export async function loadPinnedNpm({ argv = [], cwd = process.cwd() } = {}) {
++  if (process.versions.node !== EXPECTED_NODE_VERSION) {
++    throw new Error(
++      `npm policy requires Node ${EXPECTED_NODE_VERSION}; found ${process.versions.node}. ` +
++      'Use the repository-pinned runtime before installing dependencies.'
++    )
++  }
++
++  const suppliedCli = process.env.npm_execpath
++  if (!suppliedCli) {
++    throw new Error(
++      'npm policy requires npm_execpath. Run the package script through the pinned npm CLI.'
++    )
++  }
++
++  const npmCli = await realpath(path.resolve(suppliedCli))
++  const npmRoot = path.dirname(path.dirname(npmCli))
++  const expectedCli = await realpath(path.join(npmRoot, 'bin', 'npm-cli.js'))
++  if (npmCli !== expectedCli) {
++    throw new Error('npm_execpath does not resolve to npm bin/npm-cli.js')
++  }
++
++  const npmManifest = await readJSON(path.join(npmRoot, 'package.json'))
++  if (npmManifest.name !== 'npm' || npmManifest.version !== EXPECTED_NPM_VERSION) {
++    throw new Error(
++      `npm policy requires npm ${EXPECTED_NPM_VERSION}; found ${npmManifest.version ?? 'unknown'}. ` +
++      'Use the repository-pinned runtime before installing dependencies.'
++    )
++  }
++
++  const requireFromNpm = createRequire(path.join(npmRoot, 'package.json'))
++  for (const [name, version] of EXPECTED_PACKAGES) {
++    const manifest = requireFromNpm(`${name}/package.json`)
++    if (manifest.version !== version) {
++      throw new Error(`npm ${EXPECTED_NPM_VERSION} must bundle ${name} ${version}`)
++    }
++  }
++
++  const Config = requireFromNpm('@npmcli/config')
++  const { definitions, shorthands, flatten } = requireFromNpm('@npmcli/config/lib/definitions')
++  const config = new Config({
++    npmPath: npmRoot,
++    definitions,
++    shorthands,
++    flatten,
++    argv: [process.execPath, npmCli, ...argv],
++    cwd,
++  })
++  await config.load()
++
++  return {
++    npmCli,
++    npmRoot,
++    config,
++    Arborist: requireFromNpm('@npmcli/arborist'),
++    npa: requireFromNpm('npm-package-arg'),
++    pacote: requireFromNpm('pacote'),
++    ssri: requireFromNpm('ssri'),
++  }
++}
+diff --git a/scripts/vendor-markmap.sh b/scripts/vendor-markmap.sh
+index 566f77b8168fb08eae8a237a6ba0fe2983f1b32e..375f2f7b4edf2e5ef4a855b6989890c6cb77cdb0 100755
+--- a/scripts/vendor-markmap.sh
++++ b/scripts/vendor-markmap.sh
+@@ -15,13 +15,25 @@ OUT="$ROOT/examples/plugins/mill-markmap/vendor/markmap.js"
+ WORK="$(mktemp -d)"
+ trap 'rm -rf "$WORK"' EXIT
+ cd "$WORK"
+-npm init -y >/dev/null
+-npm install --no-audit --no-fund --silent "markmap-lib@$MARKMAP_LIB" "markmap-view@$MARKMAP_VIEW" "markmap-common@$MARKMAP_COMMON" "esbuild@$ESBUILD"
++cat > package.json <<JSON
++{
++  "name": "mill-vendor-markmap",
++  "private": true,
++  "dependencies": {
++    "markmap-lib": "$MARKMAP_LIB",
++    "markmap-view": "$MARKMAP_VIEW",
++    "markmap-common": "$MARKMAP_COMMON",
++    "esbuild": "$ESBUILD"
++  }
++}
++JSON
++npm --prefix "$ROOT/frontend" run deps:install -- --cwd "$WORK" -- \
++  --no-audit --no-fund --silent
+ cat > entry.js <<'JS'
+ export { Transformer } from 'markmap-lib/no-plugins'
+ export { Markmap, globalCSS } from 'markmap-view'
+ JS
+-npx esbuild entry.js --bundle --format=esm --minify --target=es2022 \
++./node_modules/.bin/esbuild entry.js --bundle --format=esm --minify --target=es2022 \
+   --banner:js="// markmap-lib@$MARKMAP_LIB (no-plugins) + markmap-view@$MARKMAP_VIEW, MIT. Built by scripts/vendor-markmap.sh -- do not edit." \
+   --outfile="$OUT"
+ ls -la "$OUT"
+diff --git a/scripts/vendor-readability.sh b/scripts/vendor-readability.sh
+index 2b4808f125b4b3230e2d2bdd96ff6e874aa3239e..5d77a027c59b9f25db846da0a4d25d2ac441eec4 100755
+--- a/scripts/vendor-readability.sh
++++ b/scripts/vendor-readability.sh
+@@ -13,12 +13,22 @@ OUT="$ROOT/examples/plugins/mill-clipper/vendor/readability.js"
+ WORK="$(mktemp -d)"
+ trap 'rm -rf "$WORK"' EXIT
+ cd "$WORK"
+-npm init -y >/dev/null
+-npm install --no-audit --no-fund --silent "@mozilla/readability@$READABILITY" "esbuild@$ESBUILD"
++cat > package.json <<JSON
++{
++  "name": "mill-vendor-readability",
++  "private": true,
++  "dependencies": {
++    "@mozilla/readability": "$READABILITY",
++    "esbuild": "$ESBUILD"
++  }
++}
++JSON
++npm --prefix "$ROOT/frontend" run deps:install -- --cwd "$WORK" -- \
++  --no-audit --no-fund --silent
+ cat > entry.js <<'JS'
+ export { Readability, isProbablyReaderable } from '@mozilla/readability'
+ JS
+-npx esbuild entry.js --bundle --format=esm --minify --target=es2022 \
++./node_modules/.bin/esbuild entry.js --bundle --format=esm --minify --target=es2022 \
+   --banner:js="// @mozilla/readability@$READABILITY, Apache-2.0. Built by scripts/vendor-readability.sh -- do not edit." \
+   --outfile="$OUT"
+ ls -la "$OUT"
+diff --git a/scripts/vite-css-modules-selftest.mjs b/scripts/vite-css-modules-selftest.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..1999e780544152263cee36713456d25e20d39bba
+--- /dev/null
++++ b/scripts/vite-css-modules-selftest.mjs
+@@ -0,0 +1,475 @@
++import assert from 'node:assert/strict'
++import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
++import { createRequire } from 'node:module'
++import os from 'node:os'
++import path from 'node:path'
++import { pathToFileURL } from 'node:url'
++
++const frontendRoot = path.resolve(import.meta.dirname, '../frontend')
++const requireFrontend = createRequire(path.join(frontendRoot, 'package.json'))
++
++async function importFrontend(packageName) {
++  return import(pathToFileURL(requireFrontend.resolve(packageName)).href)
++}
++
++const [{ build, createLogger, createServer }, { patchCssModules }, postcssModule] = await Promise.all([
++  importFrontend('vite'),
++  importFrontend('vite-css-modules'),
++  importFrontend('postcss'),
++])
++const postcss = postcssModule.default ?? postcssModule
++const proveHmr = process.argv.includes('--hmr')
++
++const fixtureRoot = await realpath(await mkdtemp(path.join(os.tmpdir(), 'mill-vite-css-modules-')))
++const messages = { warnings: [], errors: [], environments: [] }
++
++function capturingLogger() {
++  const logger = createLogger('silent')
++  logger.warn = message => messages.warnings.push(String(message))
++  logger.warnOnce = message => messages.warnings.push(String(message))
++  logger.error = message => messages.errors.push(String(message))
++  return logger
++}
++
++function outputs(result) {
++  return (Array.isArray(result) ? result : [result]).flatMap(item => item.output)
++}
++
++function textAsset(output) {
++  return typeof output.source === 'string' ? output.source : Buffer.from(output.source).toString('utf8')
++}
++
++function declarationCount(css, property, value) {
++  let count = 0
++  postcss.parse(css).walkDecls(property, declaration => {
++    if (declaration.value === value) count += 1
++  })
++  return count
++}
++
++async function loadChromium() {
++  const playwright = await importFrontend('@playwright/test')
++  const chromium = playwright.chromium ?? playwright.default?.chromium
++  assert(chromium, '@playwright/test must expose Chromium')
++  return chromium
++}
++
++async function buildFixture(entry, root = fixtureRoot) {
++  const nodeEnvBefore = process.env.NODE_ENV
++  try {
++    return await build({
++      root,
++      configFile: false,
++      customLogger: capturingLogger(),
++      plugins: [patchCssModules()],
++      build: {
++        target: 'es2022',
++        write: false,
++        minify: false,
++        cssMinify: false,
++        lib: {
++          entry: path.isAbsolute(entry) ? entry : path.join(fixtureRoot, entry),
++          formats: ['es'],
++          fileName: 'proof',
++        },
++      },
++    })
++  } finally {
++    messages.environments.push({ phase: 'build', before: nodeEnvBefore ?? null, after: process.env.NODE_ENV ?? null })
++    if (nodeEnvBefore === undefined) delete process.env.NODE_ENV
++    else process.env.NODE_ENV = nodeEnvBefore
++  }
++}
++
++async function writeValidFixture() {
++  await Promise.all([
++    writeFile(path.join(fixtureRoot, 'shared.module.css'), [
++      '.shared {',
++      '  --mill-shared-proof: present;',
++      '  color: rgb(17, 34, 51);',
++      '}',
++      '',
++    ].join('\n')),
++    writeFile(path.join(fixtureRoot, 'consumer-a.module.css'), [
++      '.consumerA {',
++      "  composes: shared from './shared.module.css';",
++      '  --mill-consumer-a-proof: present;',
++      '}',
++      '',
++    ].join('\n')),
++    writeFile(path.join(fixtureRoot, 'consumer-b.module.css'), [
++      '.consumerB {',
++      "  composes: shared from './shared.module.css';",
++      '  --mill-consumer-b-proof: present;',
++      '}',
++      '',
++    ].join('\n')),
++    writeFile(path.join(fixtureRoot, 'build-entry.js'), [
++      "import a from './consumer-a.module.css'",
++      "import b from './consumer-b.module.css'",
++      'export const classNames = [a.consumerA, b.consumerB]',
++      '',
++    ].join('\n')),
++  ])
++}
++
++async function proveBuildPipeline() {
++  const result = await buildFixture('build-entry.js')
++  const output = outputs(result)
++  const css = output.filter(item => item.type === 'asset' && item.fileName.endsWith('.css')).map(textAsset).join('\n')
++  const entry = output.find(item => item.type === 'chunk' && item.isEntry)
++
++  assert(entry, 'Vite build did not emit an entry chunk')
++  assert.equal(declarationCount(css, '--mill-shared-proof', 'present'), 1, 'shared composed CSS must be emitted once')
++  assert.equal(declarationCount(css, '--mill-consumer-a-proof', 'present'), 1, 'first consumer CSS must be emitted once')
++  assert.equal(declarationCount(css, '--mill-consumer-b-proof', 'present'), 1, 'second consumer CSS must be emitted once')
++
++  const module = await import(`data:text/javascript;base64,${Buffer.from(entry.code).toString('base64')}`)
++  assert.equal(module.classNames.length, 2)
++  assert(module.classNames.every(value => typeof value === 'string' && !value.includes('undefined')), 'composed exports must resolve to class names')
++  const [firstTokens, secondTokens] = module.classNames.map(value => new Set(value.split(/\s+/)))
++  assert.equal([...firstTokens].filter(token => secondTokens.has(token)).length, 1, 'both consumers must share exactly the composed class')
++  assert(!messages.warnings.some(message => message.includes('did not pass the `from` option')), 'build must not emit the PostCSS missing-source warning')
++}
++
++async function proveMillConsumersShareProse() {
++  const consumers = [
++    ['docs', path.join(frontendRoot, 'src/views/DocsView.module.css'), 'article'],
++    ['note', path.join(frontendRoot, 'src/atlas/MarkdownNoteField.module.css'), 'rendered'],
++    ['diagram', path.join(frontendRoot, 'src/atlas/AtlasUnitMermaid.module.css'), 'diagramHost'],
++    ['mirror', path.join(frontendRoot, 'src/atlas/AtlasCardMirrorPreview.module.css'), 'markdownBody'],
++  ]
++  const imports = consumers.map(([binding, file]) => `import ${binding} from ${JSON.stringify(file)}`)
++  const values = consumers.map(([binding, , className]) => `${binding}.${className}`)
++  const entryPath = path.join(fixtureRoot, 'mill-consumers-entry.js')
++  await writeFile(entryPath, `${imports.join('\n')}\nexport const classNames = [${values.join(', ')}]\n`)
++
++  const result = await buildFixture(entryPath, frontendRoot)
++  const output = outputs(result)
++  const css = output.filter(item => item.type === 'asset' && item.fileName.endsWith('.css')).map(textAsset).join('\n')
++  const entry = output.find(item => item.type === 'chunk' && item.isEntry)
++  assert(entry, 'Mill consumer build did not emit an entry chunk')
++
++  const module = await import(`data:text/javascript;base64,${Buffer.from(entry.code).toString('base64')}`)
++  assert.equal(module.classNames.length, 4, 'all four Markdown prose consumers must be built')
++  assert(module.classNames.every(value => typeof value === 'string' && !value.includes('undefined')), 'every Mill consumer must resolve its composed prose class')
++  const tokenSets = module.classNames.map(value => new Set(value.split(/\s+/)))
++  const sharedTokens = [...tokenSets[0]].filter(token => tokenSets.slice(1).every(tokens => tokens.has(token)))
++  assert.equal(sharedTokens.length, 1, 'all four Mill consumers must share exactly one Markdown prose class')
++  const cssRoot = postcss.parse(css)
++  let proseTypographyRules = 0
++  let mermaidDescendantRules = 0
++  cssRoot.walkRules(rule => {
++    if (!rule.selector.includes(`.${sharedTokens[0]}`)) return
++    rule.walkDecls('line-height', declaration => {
++      if (declaration.value === '1.5') proseTypographyRules += 1
++    })
++    if (rule.selector.includes('.atlas-mermaid-diagram')) mermaidDescendantRules += 1
++  })
++  assert.equal(proseTypographyRules, 1, 'the built shared class must retain Markdown prose typography')
++  assert(mermaidDescendantRules >= 1, 'the built shared class must retain Markdown prose global descendant styles')
++}
++
++async function proveMissingClassRefusal() {
++  await writeFile(path.join(fixtureRoot, 'missing.module.css'), [
++    '.broken {',
++    "  composes: absent from './shared.module.css';",
++    '}',
++    '',
++  ].join('\n'))
++  await writeFile(path.join(fixtureRoot, 'missing-entry.js'), "import styles from './missing.module.css'\nexport default styles.broken\n")
++
++  const loggedErrorsBefore = messages.errors.length
++  await assert.rejects(
++    buildFixture('missing-entry.js'),
++    error => /Cannot resolve "absent" from "\.\/shared\.module\.css"/.test(String(error)),
++    'a missing composed class must fail the Vite build',
++  )
++  messages.errors.splice(loggedErrorsBefore)
++}
++
++async function proveHmrPreservesState() {
++  const chromium = await loadChromium()
++  const reactPlugin = (await importFrontend('@vitejs/plugin-react')).default
++  const sharedPath = path.join(fixtureRoot, 'shared.module.css')
++  const sharedCss = await readFile(sharedPath, 'utf8')
++  const fixtureFiles = ['index.html', 'hmr-observer.js', 'dev-component.jsx', 'dev-entry.jsx'].map(file => path.join(fixtureRoot, file))
++
++  async function runTrial(label, plugins) {
++    const nodeEnvBefore = process.env.NODE_ENV
++    let server
++    let browser
++    let page
++    const navigations = []
++    const websocketFrames = []
++    try {
++      server = await createServer({
++        root: fixtureRoot,
++        configFile: false,
++        customLogger: capturingLogger(),
++        plugins,
++        resolve: {
++          alias: [
++            { find: /^react$/, replacement: requireFrontend.resolve('react') },
++            { find: /^react-dom\/client$/, replacement: requireFrontend.resolve('react-dom/client') },
++          ],
++        },
++        server: { host: '127.0.0.1', port: 0, strictPort: false },
++      })
++      await server.listen()
++      const writtenFiles = [...fixtureFiles, sharedPath]
++      const fixtureWritesObserved = new Promise((resolve, reject) => {
++        const pending = new Set(writtenFiles)
++        const cleanup = () => {
++          server.watcher.off('add', onFile)
++          server.watcher.off('change', onFile)
++        }
++        const timeout = setTimeout(() => {
++          cleanup()
++          reject(new Error(`Vite watcher did not observe fixture writes: ${[...pending].join(', ')}`))
++        }, 5_000)
++        const onFile = file => {
++          pending.delete(path.isAbsolute(file) ? file : path.join(fixtureRoot, file))
++          if (pending.size > 0) return
++          clearTimeout(timeout)
++          cleanup()
++          resolve()
++        }
++        server.watcher.on('add', onFile)
++        server.watcher.on('change', onFile)
++      })
++      await Promise.all([
++        writeFile(fixtureFiles[0], '<div id="app"></div><script type="module" src="/dev-entry.jsx"></script>\n'),
++        writeFile(fixtureFiles[1], [
++          'globalThis.__millHmrEvents = []',
++          'if (import.meta.hot) {',
++          "  import.meta.hot.on('vite:beforeUpdate', payload => globalThis.__millHmrEvents.push({ type: payload.type, updates: payload.updates.map(update => ({ type: update.type, path: update.path, acceptedPath: update.acceptedPath })) }))",
++          "  import.meta.hot.on('vite:beforeFullReload', payload => globalThis.__millHmrEvents.push({ type: payload.type, path: payload.path, triggeredBy: payload.triggeredBy }))",
++          '}',
++          '',
++        ].join('\n')),
++        writeFile(fixtureFiles[2], [
++          "import { createElement, useState } from 'react'",
++          "import styles from './consumer-a.module.css'",
++          'globalThis.__millComponentModuleLoads = (globalThis.__millComponentModuleLoads ?? 0) + 1',
++          'export function Fixture() {',
++          "  const [value, setValue] = useState('')",
++          "  return createElement('div', null,",
++          "    createElement('input', { id: 'state', value, onChange: event => setValue(event.target.value) }),",
++          "    createElement('div', { id: 'target', className: styles.consumerA }, 'proof'),",
++          '  )',
++          '}',
++          '',
++        ].join('\n')),
++        writeFile(fixtureFiles[3], [
++          "import './hmr-observer.js'",
++          "import { createElement } from 'react'",
++          "import { createRoot } from 'react-dom/client'",
++          "import { Fixture } from './dev-component.jsx'",
++          'globalThis.__millRootModuleLoads = (globalThis.__millRootModuleLoads ?? 0) + 1',
++          "createRoot(document.querySelector('#app')).render(createElement(Fixture))",
++          '',
++        ].join('\n')),
++        writeFile(sharedPath, sharedCss),
++      ])
++      await fixtureWritesObserved
++      const transformedComponent = await server.transformRequest('/dev-component.jsx')
++      const refreshRegistered = Boolean(
++        transformedComponent?.code.includes('$RefreshReg$')
++        && transformedComponent.code.includes('import.meta.hot.accept'),
++      )
++
++      const address = server.httpServer?.address()
++      assert(address && typeof address === 'object', 'Vite did not expose its OS-assigned port')
++      browser = await chromium.launch({ headless: true })
++      page = await browser.newPage()
++      page.on('framenavigated', frame => {
++        if (frame === page.mainFrame()) navigations.push(frame.url())
++      })
++      page.on('websocket', socket => {
++        socket.on('framereceived', frame => websocketFrames.push(String(frame.payload)))
++      })
++      await page.goto(`http://127.0.0.1:${address.port}/`)
++      await server.waitForRequestsIdle()
++      await page.locator('#state').waitFor()
++      await page.locator('#state').fill('retained state')
++      assert.equal(await page.locator('#state').inputValue(), 'retained state', `${label} control input must hold state before the CSS edit`)
++      await page.waitForFunction(() => getComputedStyle(document.querySelector('#target')).color === 'rgb(17, 34, 51)')
++
++      const navigationCountBeforeEdit = navigations.length
++      const websocketCountBeforeEdit = websocketFrames.length
++      await writeFile(sharedPath, sharedCss.replace('rgb(17, 34, 51)', 'rgb(51, 68, 85)'))
++      const colorUpdated = await page.waitForFunction(
++        () => getComputedStyle(document.querySelector('#target')).color === 'rgb(51, 68, 85)',
++        undefined,
++        { timeout: 5_000 },
++      ).then(() => true, () => false)
++      const observed = await page.evaluate(() => ({
++        events: globalThis.__millHmrEvents,
++        componentModuleLoads: globalThis.__millComponentModuleLoads,
++        rootModuleLoads: globalThis.__millRootModuleLoads,
++      }))
++      return {
++        label,
++        colorUpdated,
++        nodeEnvBefore: nodeEnvBefore ?? null,
++        nodeEnvDuring: process.env.NODE_ENV ?? null,
++        serverIsProduction: server.config.isProduction,
++        refreshRegistered,
++        inputValue: await page.locator('#state').inputValue(),
++        navigationCountBeforeEdit,
++        navigations,
++        websocketFrames: websocketFrames.slice(websocketCountBeforeEdit),
++        ...observed,
++      }
++    } finally {
++      await page?.close()
++      await browser?.close()
++      await server?.close()
++      messages.environments.push({ phase: `dev-${label}`, before: nodeEnvBefore ?? null, after: process.env.NODE_ENV ?? null })
++      if (nodeEnvBefore === undefined) delete process.env.NODE_ENV
++      else process.env.NODE_ENV = nodeEnvBefore
++    }
++  }
++
++  const baseline = await runTrial('baseline', [reactPlugin()])
++  const patched = await runTrial('patched', [patchCssModules(), reactPlugin()])
++  console.log(`vite-css-modules-hmr-evidence: ${JSON.stringify({ baseline, patched })}`)
++  assert.equal(baseline.colorUpdated, false, 'unpatched Vite must expose the shared composed-CSS HMR gap')
++  assert.equal(baseline.inputValue, 'retained state', 'the baseline control must retain React state when no update propagates')
++  assert.equal(baseline.serverIsProduction, false, 'baseline control must run in Vite development mode')
++  assert.equal(baseline.refreshRegistered, true, 'baseline control must register React Fast Refresh')
++  assert.equal(patched.colorUpdated, true, 'patched Vite must propagate the shared composed-CSS update')
++  assert.equal(patched.inputValue, 'retained state', 'patched CSS HMR must preserve React input state')
++  assert.equal(patched.serverIsProduction, false, 'patched control must run in Vite development mode')
++  assert.equal(patched.refreshRegistered, true, 'patched control must register React Fast Refresh')
++  assert.equal(patched.navigations.length, patched.navigationCountBeforeEdit, 'patched CSS HMR must not navigate the main frame')
++  assert.equal(patched.rootModuleLoads, 1, 'patched CSS HMR must not reload the application root module')
++  assert(patched.componentModuleLoads >= 1, 'patched CSS HMR must load the React CSS consumer')
++  assert(patched.events.some(event => event.type === 'update'), 'patched CSS HMR must expose a Vite update payload')
++  assert(!patched.events.some(event => event.type === 'full-reload'), 'patched CSS HMR must not expose a Vite full reload payload')
++}
++
++async function captureMillConsumerStyles(browser, plugins) {
++  const consumers = [
++    ['docs', path.join(frontendRoot, 'src/views/DocsView.module.css'), 'article'],
++    ['note', path.join(frontendRoot, 'src/atlas/MarkdownNoteField.module.css'), 'rendered'],
++    ['diagram', path.join(frontendRoot, 'src/atlas/AtlasUnitMermaid.module.css'), 'diagramHost'],
++    ['mirror', path.join(frontendRoot, 'src/atlas/AtlasCardMirrorPreview.module.css'), 'markdownBody'],
++  ]
++  const imports = consumers.map(([binding, file]) => `import ${binding} from ${JSON.stringify(`/@fs${file}`)}`)
++  const sections = consumers.map(([binding, , className]) => [
++    `const ${binding}Root = document.createElement('section')`,
++    `${binding}Root.dataset.consumer = '${binding}'`,
++    `${binding}Root.className = ${binding}.${className}`,
++    `${binding}Root.innerHTML = '<a>link</a><code>code</code><pre>pre</pre><table><tbody><tr><td>cell</td></tr></tbody></table><div class="atlas-mermaid-diagram"><svg></svg></div>'`,
++    `document.body.append(${binding}Root)`,
++  ].join('\n'))
++  await writeFile(path.join(fixtureRoot, 'mill-browser-entry.js'), [
++    ...imports,
++    ...sections,
++    'globalThis.__millStylesReady = true',
++    '',
++  ].join('\n'))
++  await writeFile(path.join(fixtureRoot, 'mill-browser.html'), [
++    '<style>:root { --fgColor-default: rgb(9, 18, 27); --bgColor-muted: rgb(220, 221, 222); --borderColor-default: rgb(60, 61, 62); --borderRadius-small: 3px; --borderRadius-medium: 6px; --base-size-4: 4px; --base-size-8: 8px; --base-size-12: 12px; --stack-gap-normal: 16px; }</style>',
++    '<script type="module" src="/mill-browser-entry.js"></script>',
++    '',
++  ].join('\n'))
++
++  const server = await createServer({
++    root: fixtureRoot,
++    configFile: false,
++    customLogger: capturingLogger(),
++    plugins,
++    server: {
++      host: '127.0.0.1',
++      port: 0,
++      strictPort: false,
++      fs: { allow: [fixtureRoot, frontendRoot] },
++    },
++  })
++  try {
++    await server.listen()
++    const address = server.httpServer?.address()
++    assert(address && typeof address === 'object', 'Vite did not expose its OS-assigned comparison port')
++    const page = await browser.newPage()
++    const diagnostics = []
++    page.on('console', message => diagnostics.push(`console ${message.type()}: ${message.text()}`))
++    page.on('pageerror', error => diagnostics.push(`pageerror: ${error.message}`))
++    page.on('requestfailed', request => diagnostics.push(`requestfailed ${request.url()}: ${request.failure()?.errorText ?? 'unknown'}`))
++    const response = await page.goto(`http://127.0.0.1:${address.port}/mill-browser.html`)
++    diagnostics.push(`document status: ${response?.status() ?? 'none'}`)
++    try {
++      await page.waitForFunction(() => globalThis.__millStylesReady === true, undefined, { timeout: 10_000 })
++    } catch (error) {
++      throw new Error(`Mill consumer fixture did not become ready:\n${diagnostics.join('\n')}`, { cause: error })
++    }
++    const styles = await page.locator('[data-consumer]').evaluateAll(elements => elements.map(element => {
++      const root = getComputedStyle(element)
++      const anchor = getComputedStyle(element.querySelector('a'))
++      const code = getComputedStyle(element.querySelector('code'))
++      const pre = getComputedStyle(element.querySelector('pre'))
++      const table = getComputedStyle(element.querySelector('table'))
++      const cell = getComputedStyle(element.querySelector('td'))
++      const diagram = getComputedStyle(element.querySelector('.atlas-mermaid-diagram'))
++      const svg = getComputedStyle(element.querySelector('svg'))
++      return {
++        consumer: element.dataset.consumer,
++        typography: [root.color, root.fontSize, root.lineHeight],
++        link: anchor.textDecorationLine,
++        code: [code.backgroundColor, code.borderRadius, code.paddingLeft],
++        pre: [pre.backgroundColor, pre.borderRadius, pre.paddingTop, pre.overflowX],
++        table: table.borderCollapse,
++        cell: [cell.borderTopWidth, cell.paddingLeft],
++        diagram: [diagram.display, diagram.justifyContent, diagram.overflowX],
++        svg: [svg.maxWidth, svg.height],
++      }
++    }))
++    await page.close()
++    return styles
++  } finally {
++    await server.close()
++  }
++}
++
++async function proveMillConsumerStyleEquivalence() {
++  const chromium = await loadChromium()
++  const browser = await chromium.launch({ headless: true })
++  try {
++    const baseline = await captureMillConsumerStyles(browser, [])
++    const patched = await captureMillConsumerStyles(browser, [patchCssModules()])
++    const baselineDocs = baseline.find(style => style.consumer === 'docs')
++    const patchedDocs = patched.find(style => style.consumer === 'docs')
++    assert(baselineDocs && patchedDocs, 'both builds must render the Docs prose consumer')
++    assert.deepEqual(baselineDocs.typography, ['rgb(9, 18, 27)', '14px', '21px'], 'the unpatched baseline must record the duplicated prose override')
++    assert.deepEqual(patchedDocs.typography, ['rgb(9, 18, 27)', '15px', '22.5px'], 'the patched pipeline must honor the Docs-owned reading size and inherited line height')
++
++    const { typography: _baselineTypography, ...baselineDocsRest } = baselineDocs
++    const { typography: _patchedTypography, ...patchedDocsRest } = patchedDocs
++    assert.deepEqual(patchedDocsRest, baselineDocsRest, 'the Docs typography correction must be the only measured style change')
++    assert.deepEqual(
++      patched.filter(style => style.consumer !== 'docs'),
++      baseline.filter(style => style.consumer !== 'docs'),
++      'patched CSS Modules must preserve every measured style for the other three Mill consumers',
++    )
++  } finally {
++    await browser.close()
++  }
++}
++
++try {
++  await writeValidFixture()
++  await proveBuildPipeline()
++  await proveMillConsumersShareProse()
++  await proveMissingClassRefusal()
++  if (proveHmr) {
++    await proveMillConsumerStyleEquivalence()
++    await proveHmrPreservesState()
++  }
++  assert.equal(messages.errors.length, 0, `unexpected Vite errors: ${messages.errors.join('\n')}`)
++  console.log(`vite-css-modules-environment-evidence: ${JSON.stringify(messages.environments)}`)
++  console.log(`vite-css-modules-selftest: OK (build composition, deduplication, four Mill consumers, missing export${proveHmr ? ', computed styles including Docs typography correction, HMR state' : ''})`)
++} finally {
++  await rm(fixtureRoot, { recursive: true, force: true })
++}

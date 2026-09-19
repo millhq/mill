@@ -1,0 +1,108 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 74501056a24e7536ef694ae43efb15ade019873e..64336b6d1fcd7a7d7347dd1bac6248c8d2b0dbb0 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -163,6 +163,19 @@ jobs:
+       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+       - run: ./scripts/check-rules-frontmatter.sh
+ 
++  # Mirrors lefthook.yml's own standing-context job -- same script
++  # (goal 0325's standing-context budget: CLAUDE.md and every
++  # unconditional .claude/rules/*.md file load into EVERY session, so
++  # their size is a per-turn tax). Grep/wc-only, so like comment-hygiene
++  # it needs no build setup and no changes gate -- a docs-only PR can
++  # breach the budget with prose alone.
++  standing-context:
++    runs-on: ubuntu-latest
++    timeout-minutes: 5
++    steps:
++      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
++      - run: ./scripts/check-standing-context.sh
++
+   # Enforces the root-layout rule (exactly one root Go file, main.go;
+   # services live under internal/services/<ctx>svc) via ls-lint
+   # (adopted, not hand-rolled -- unlike file-loc-limit, a real commodity
+@@ -601,6 +614,7 @@ jobs:
+       - ui-copy
+       - toolbar-action-testids
+       - rules-frontmatter
++      - standing-context
+       - root-file-naming
+       - sdk-freshness
+       - frontend
+diff --git a/lefthook.yml b/lefthook.yml
+index 25141b4ffe24fd4a00031dd68458f3be45c6b4a2..e9e1d779442d4f419c857a1c6318c7bf7e117a65 100644
+--- a/lefthook.yml
++++ b/lefthook.yml
+@@ -66,6 +66,14 @@ pre-commit:
+       # supports it, Mill doesn't use it yet).
+       glob: ".claude/rules/*.md"
+       run: ./scripts/check-rules-frontmatter.sh
++    - name: standing-context
++      # No glob, deliberately: CLAUDE.md and every unconditional rule
++      # file load into EVERY session regardless of which files a commit
++      # touches, so a budget breach from prose alone (no code change)
++      # must still be caught. check-standing-context.sh is fast (wc -l/
++      # wc -w only), so unconditional is cheap, same shape as
++      # root-file-naming just below.
++      run: ./scripts/check-standing-context.sh
+     - name: root-file-naming
+       # No glob, deliberately: .ls-lint.yml now covers every file type
+       # at the repo root (its `.*` catch-all), not just .go, so this
+diff --git a/scripts/check-standing-context.sh b/scripts/check-standing-context.sh
+new file mode 100755
+index 0000000000000000000000000000000000000000..ccb26b6384f6d347f94a7caee5f3f7e04aec0879
+--- /dev/null
++++ b/scripts/check-standing-context.sh
+@@ -0,0 +1,51 @@
++#!/usr/bin/env bash
++# Enforces the standing-context budget (goal 0325): CLAUDE.md and every
++# unconditional rule (a .claude/rules/*.md file with no `paths:`
++# frontmatter key -- see check-rules-frontmatter.sh's own detection of
++# that key) load into EVERY session, so their size is a permanent
++# per-turn tax, not a one-time read. Run by lefthook (pre-commit) and
++# CI's standing-context job, one script both call.
++set -euo pipefail
++
++claude_md="CLAUDE.md"
++claude_md_limit=200
++rules_dir=".claude/rules"
++rules_word_limit=3000
++
++violations=0
++
++if [[ -f "$claude_md" ]]; then
++  claude_md_lines=$(wc -l <"$claude_md" | tr -d '[:space:]')
++  echo "standing-context: $claude_md is $claude_md_lines lines (limit $claude_md_limit)"
++  if ((claude_md_lines > claude_md_limit)); then
++    echo "error: $claude_md is $claude_md_lines lines, over the $claude_md_limit-line budget" >&2
++    violations=$((violations + 1))
++  fi
++fi
++
++total_words=0
++if [[ -d "$rules_dir" ]]; then
++  while IFS= read -r -d '' file; do
++    # A rule with a `paths:` frontmatter key loads only for matching
++    # files, not every session -- it's outside the standing budget.
++    # No frontmatter at all (or frontmatter without `paths:`) loads
++    # unconditionally, same as CLAUDE.md.
++    if grep -q '^paths:' "$file"; then
++      continue
++    fi
++    words=$(wc -w <"$file" | tr -d '[:space:]')
++    echo "standing-context: $file is $words words (unconditional)"
++    total_words=$((total_words + words))
++  done < <(find "$rules_dir" -maxdepth 1 -name '*.md' -print0 | sort -z)
++fi
++
++echo "standing-context: unconditional .claude/rules/*.md total is $total_words words (limit $rules_word_limit)"
++if ((total_words > rules_word_limit)); then
++  echo "error: unconditional .claude/rules/*.md total is $total_words words, over the $rules_word_limit-word budget" >&2
++  violations=$((violations + 1))
++fi
++
++if ((violations > 0)); then
++  echo "error: $violations standing-context budget violation(s) -- see CLAUDE.md's standing-context-budget note and docs/adr/0050-orchestration-model.md." >&2
++  exit 1
++fi
