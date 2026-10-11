@@ -242,7 +242,7 @@ func ResolveUpdateCurrentVersion(effectiveChannel, updateVersion string) string 
 }
 
 // CheckForUpdates asks the configured provider (GitHub Releases,
-// alicoding/mill) whether a newer version exists. The Wails-bound RPC
+// millhq/mill) whether a newer version exists. The Wails-bound RPC
 // surface (no context parameter is bindable); checkForUpdates below
 // does the real work against a caller-supplied context, letting the
 // background loop (settingsservice_updatenotice.go) propagate its own

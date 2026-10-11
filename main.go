@@ -359,7 +359,7 @@ func main() {
 	// under its own line-count convention). A construction failure here
 	// is logged, not fatal -- a broken updater must never block the app
 	// from starting.
-	if err := settingssvc.InitUpdater(app.Updater, "alicoding/mill", settingssvc.ResolveUpdateCurrentVersion(effectiveChannel, millUpdateVersion), effectiveChannel, settingsService); err != nil {
+	if err := settingssvc.InitUpdater(app.Updater, "millhq/mill", settingssvc.ResolveUpdateCurrentVersion(effectiveChannel, millUpdateVersion), effectiveChannel, settingsService); err != nil {
 		logger.Error("updater init", "error", err)
 	}
 	// Opt-in daily background check (goal 0122) -- a no-op unless the
