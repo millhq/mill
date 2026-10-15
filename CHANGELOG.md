@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.135.5-beta.3220](https://github.com/millhq/mill/compare/v0.135.4-beta.3220...v0.135.5-beta.3220) (2026-09-13)
+
+
+### Bug Fixes
+
+* use native save path for contract exports ([#922](https://github.com/millhq/mill/issues/922)) ([4d63024](https://github.com/millhq/mill/commit/4d630245098abe485a36765f258a61cdf39ecfef))
+
 ## [0.5.0](https://github.com/alicoding/mill/compare/v0.4.0...v0.5.0) (2026-08-22)
 
 
